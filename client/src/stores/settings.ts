@@ -13,6 +13,8 @@ export interface SettingsState {
 	defaultRoomSettings?: DefaultRoomSettings;
 	enableAdapterSelector: boolean;
 	nativeYoutubeControls: boolean;
+	/** Voice is silenced on this device. Nobody else is affected. */
+	voiceMuted: boolean;
 }
 
 export type DefaultRoomSettings = Pick<RoomSettings, "autoSkipSegmentCategories">;
@@ -48,6 +50,7 @@ export const settingsModule: Module<SettingsState, unknown> = {
 		sfxVolume: 0.8,
 		enableAdapterSelector: false,
 		nativeYoutubeControls: false,
+		voiceMuted: false,
 	},
 	mutations: {
 		UPDATE(state, settings: Partial<SettingsState>) {

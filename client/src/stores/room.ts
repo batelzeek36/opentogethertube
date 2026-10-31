@@ -6,6 +6,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import type { ServerMessageSync } from "ott-common/models/messages";
 import { deserializeMap, deserializeSet } from "ott-common/serialize";
 import type { FullOTTStoreState } from "@/store";
+import { VOICE_RULE_DEFAULTS } from "ott-common/models/voice";
 
 export interface RoomState {
 	name: string;
@@ -32,6 +33,9 @@ export interface RoomState {
 	prevQueue: QueueItem[] | null;
 	enableVoteSkip: boolean;
 	votesToSkip: Set<string>;
+	voiceEnabled: boolean;
+	voiceMaxTalkSeconds: number;
+	voiceSlowModeSeconds: number;
 }
 
 export const roomModule: Module<RoomState, FullOTTStoreState> = {
@@ -56,6 +60,9 @@ export const roomModule: Module<RoomState, FullOTTStoreState> = {
 		enableVoteSkip: false,
 		votesToSkip: new Set(),
 		videoSegments: [],
+		voiceEnabled: VOICE_RULE_DEFAULTS.voiceEnabled,
+		voiceMaxTalkSeconds: VOICE_RULE_DEFAULTS.voiceMaxTalkSeconds,
+		voiceSlowModeSeconds: VOICE_RULE_DEFAULTS.voiceSlowModeSeconds,
 	},
 	mutations: {
 		SYNC(state, stateupdate: Partial<RoomState>) {
@@ -107,6 +114,15 @@ export const roomModule: Module<RoomState, FullOTTStoreState> = {
 			}
 			if ("enableVoteSkip" in message) {
 				stateupdate.enableVoteSkip = message.enableVoteSkip;
+			}
+			if ("voiceEnabled" in message) {
+				stateupdate.voiceEnabled = message.voiceEnabled;
+			}
+			if ("voiceMaxTalkSeconds" in message) {
+				stateupdate.voiceMaxTalkSeconds = message.voiceMaxTalkSeconds;
+			}
+			if ("voiceSlowModeSeconds" in message) {
+				stateupdate.voiceSlowModeSeconds = message.voiceSlowModeSeconds;
 			}
 			if ("videoSegments" in message) {
 				stateupdate.videoSegments = message.videoSegments;

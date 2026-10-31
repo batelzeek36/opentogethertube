@@ -152,6 +152,19 @@ export const PERMISSIONS = [
 		mask: 1 << 26,
 		minRole: Role.UnregisteredUser,
 	}),
+	// Set the voice rules. Moderator at the lowest, so nobody can hold this in a room without an
+	// owner: only an owner or admin can make someone a moderator.
+	new Permission({
+		name: "configure-room.voice",
+		mask: 1 << 27,
+		minRole: Role.Moderator,
+	}),
+	// Take someone out of voice, or let them back in.
+	new Permission({
+		name: "manage-users.voice-remove",
+		mask: 1 << 28,
+		minRole: Role.Moderator,
+	}),
 ];
 
 const permMaskMap = new Map(PERMISSIONS.map(p => [p.name, p.mask]));
@@ -178,6 +191,8 @@ function defaultPermissions(): Grants {
 			"manage-users.promote-trusted-user",
 			"manage-users.demote-trusted-user",
 			"manage-users.kick",
+			"manage-users.voice-remove",
+			"configure-room.voice",
 		]),
 		[Role.Administrator]: parseIntoGrantMask(["*"]),
 		[Role.Owner]: parseIntoGrantMask(["*"]),

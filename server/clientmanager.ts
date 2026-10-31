@@ -123,6 +123,7 @@ export function addClient(client: Client) {
 	connections.push(client);
 	client.on("auth", onClientAuth);
 	client.on("message", onClientMessage);
+	client.on("binary", onClientBinary);
 	client.on("disconnect", onClientDisconnect);
 }
 
@@ -195,6 +196,14 @@ async function onClientMessage(client: Client, msg: ClientMessage) {
 			};
 			await makeRoomRequest(client, request);
 		} else if (msg.action === "req") {
+			// Audio is binary, which the balancer protocol cannot carry.
+			if (
+				client instanceof BalancerClient &&
+				msg.request.type === RoomRequestType.VoiceJoinRequest
+			) {
+				client.send({ action: "voice-you", event: "join-refused", reason: "unsupported" });
+				return;
+			}
 			await makeRoomRequest(client, msg.request);
 		} else if (msg.action === "notify") {
 			if (msg.message === "usernameChanged") {
@@ -273,6 +282,27 @@ async function onClientDisconnect(client: Client) {
 			value: client.id,
 		},
 	});
+}
+
+/**
+ * An audio frame arrived. It goes only to the members of the sender's voice channel, and never
+ * through the room's publish, Redis or the logs.
+ */
+function onClientBinary(client: Client, frame: Buffer) {
+	const room = roommanager.getLoadedRoom(client.room);
+	const recipients = room?.voice.acceptFrame(client.id, frame);
+	if (!recipients || recipients.length === 0) {
+		return;
+	}
+	for (const member of getClientsInRoom(client.room)) {
+		if (member instanceof DirectClient && recipients.includes(member.id)) {
+			try {
+				member.sendBinary(frame);
+			} catch {
+				log.error(`failed to send audio to client ${member.id}`);
+			}
+		}
+	}
 }
 
 function onBalancerConnect(conn: BalancerConnection) {
@@ -452,6 +482,8 @@ async function handleCommand(roomName: string, command: ClientManagerCommand) {
 	if (command.type === "kick") {
 		const client = getClient(command.clientId);
 		client?.kick(OttWebsocketError.KICKED);
+	} else if (command.type === "send") {
+		getClient(command.clientId)?.send(command.msg);
 	}
 }
 
@@ -536,7 +568,7 @@ setInterval(() => {
 	}
 }, 10000);
 
-export type ClientManagerCommand = CmdKick;
+export type ClientManagerCommand = CmdKick | CmdSend;
 
 interface CmdBase {
 	type: string;
@@ -545,6 +577,13 @@ interface CmdBase {
 export interface CmdKick extends CmdBase {
 	type: "kick";
 	clientId: ClientId;
+}
+
+/** Send a message to one client only. */
+export interface CmdSend extends CmdBase {
+	type: "send";
+	clientId: ClientId;
+	msg: ServerMessage;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: biome migration

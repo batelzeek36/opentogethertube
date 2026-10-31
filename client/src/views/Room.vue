@@ -88,6 +88,12 @@
 						/>
 						<ReactionOverlay />
 						<ReactionBar :mode="controlsMode" :visible="controlsVisible" />
+						<VoiceTalkButton
+							v-if="store.state.fullscreen && voice.myChannel.value"
+							v-show="controlsVisible || voice.holding.value"
+							floating
+							class="voice-floating-position"
+						/>
 						<div
 							class="movie-only-play absolute inset-0 z-200 flex items-center justify-center"
 							data-movie-only-keep
@@ -117,6 +123,7 @@
 				</div>
 			</div>
 			<div class="my-2.5">
+				<VoicePanel />
 				<RestoreQueue />
 				<VoteSkip />
 			</div>
@@ -299,6 +306,9 @@ import { useMovieOnly } from "@/components/composables/movie-only";
 import MovieOnlyButton from "@/components/MovieOnlyButton.vue";
 import MovieOnlyLayer from "@/components/MovieOnlyLayer.vue";
 import ReactionOverlay from "@/components/ReactionOverlay.vue";
+import VoicePanel from "@/components/VoicePanel.vue";
+import VoiceTalkButton from "@/components/VoiceTalkButton.vue";
+import { provideVoice } from "@/voice/session";
 import UserList from "@/components/UserList.vue";
 import VideoQueue from "@/components/VideoQueue.vue";
 import RoomSettingsForm from "@/components/RoomSettingsForm.vue";
@@ -344,6 +354,8 @@ export default defineComponent({
 		Chat,
 		ReactionBar,
 		ReactionOverlay,
+		VoicePanel,
+		VoiceTalkButton,
 		AddPreview,
 		UserList,
 		RoomSettingsForm,
@@ -375,6 +387,7 @@ export default defineComponent({
 		const store = useStore();
 		const connection = useConnection();
 		const roomapi = useRoomApi(connection);
+		const voice = provideVoice();
 		const { t } = useI18n();
 		const router = useRouter();
 		const route = useRoute();
@@ -864,6 +877,7 @@ export default defineComponent({
 		return {
 			store,
 			roomapi,
+			voice,
 			granted,
 			isOfficialSite,
 
@@ -928,6 +942,14 @@ export default defineComponent({
 </script>
 
 <style>
+/* In fullscreen the voice panel is out of reach, so talk sits right above the reaction bar. */
+.voice-floating-position {
+	position: absolute;
+	left: 10px;
+	bottom: 130px;
+	z-index: 40;
+}
+
 /* The whole movie frame and the chat, in the space above a phone's keyboard. See useTypingView. */
 .typing-view {
 	--typing-chat-height: 112px;
@@ -941,6 +963,7 @@ export default defineComponent({
 
 .typing-view .video-controls-wrapper,
 .typing-view .reaction-bar,
+.typing-view .voice-floating-position,
 .typing-view #mouse-event-swallower {
 	display: none;
 }

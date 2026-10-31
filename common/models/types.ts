@@ -65,6 +65,9 @@ export interface RoomSettings {
 	autoSkipSegmentCategories: Category[];
 	restoreQueueBehavior: BehaviorOption;
 	enableVoteSkip: boolean;
+	voiceEnabled: boolean;
+	voiceMaxTalkSeconds: number;
+	voiceSlowModeSeconds: number;
 }
 
 /**

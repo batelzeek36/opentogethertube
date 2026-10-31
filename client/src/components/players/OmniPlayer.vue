@@ -187,6 +187,7 @@ import {
 	usePlaybackRate,
 	useQualities,
 	useVolume,
+	useVolumeDuck,
 } from "../composables";
 
 const props = defineProps({
@@ -256,7 +257,9 @@ watch(
 		}
 	},
 );
-watch(volume.volume, v => {
+const volumeDuck = useVolumeDuck();
+const playerVolume = computed(() => volume.volume.value * volumeDuck.value);
+watch(playerVolume, v => {
 	if (player.value) {
 		player.value.setVolume(v);
 	}
@@ -334,7 +337,7 @@ async function onApiReady() {
 	captions.isCaptionsSupported.value = isCaptionsSupported();
 	qualities.isQualitySupported.value = isQualitySupported();
 	if (player.value) {
-		player.value.setVolume(volume.volume.value);
+		player.value.setVolume(playerVolume.value);
 		if (implementsAudioBoost(player.value)) {
 			player.value.setAudioBoost(store.state.settings.audioBoost);
 		}
