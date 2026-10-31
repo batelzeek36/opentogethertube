@@ -64,6 +64,7 @@ const canReact = computed(() => granted("chat"));
 }
 
 .reaction-button {
+	font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
 	flex: none;
 	width: 38px;
 	height: 38px;

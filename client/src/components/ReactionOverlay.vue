@@ -67,6 +67,7 @@ onUnmounted(() => connection.removeMessageHandler("reaction", onReaction));
 }
 
 .floating-reaction {
+	font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
 	position: absolute;
 	bottom: 130px;
 	font-size: 34px;
