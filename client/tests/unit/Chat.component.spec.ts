@@ -23,7 +23,7 @@ describe("Chat component", () => {
 	});
 
 	it("puts the page back where it was when the chat closes", async () => {
-		const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+		const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
 		Object.defineProperty(window, "scrollY", { configurable: true, value: 120 });
 		const { wrapper } = mountComponent(Chat);
 		await wrapper.get('[data-cy="chat-activate"]').trigger("click");
