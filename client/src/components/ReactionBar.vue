@@ -3,7 +3,7 @@
 		v-if="canReact"
 		v-show="visible"
 		class="reaction-bar"
-		:class="mode"
+		:class="[mode, { 'chat-open': chatOpen }]"
 		role="group"
 		:aria-label="$t('room.reactions')"
 		data-cy="reaction-bar"
@@ -28,6 +28,7 @@ import { REACTIONS } from "ott-common/models/reactions";
 import { useConnection } from "@/plugins/connection";
 import { useGrants } from "@/components/composables/grants";
 import { useRoomApi } from "@/util/roomapi";
+import { chatOpen } from "./chat-state";
 
 defineProps<{
 	mode: "in-video" | "outside-video";

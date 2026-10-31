@@ -5,6 +5,7 @@ import { PlayerStatus, Role } from "ott-common/models/types";
 import { REACTIONS } from "ott-common/models/reactions";
 import { OttRoomConnectionMock, connectionInjectKey } from "@/plugins/connection";
 import ReactionBar from "@/components/ReactionBar.vue";
+import { chatOpen } from "@/components/chat-state";
 import ReactionOverlay from "@/components/ReactionOverlay.vue";
 import { mountComponent } from "./component-test-utils";
 
@@ -39,6 +40,19 @@ describe("ReactionBar", () => {
 				request: { type: RoomRequestType.ReactionRequest, emoji: REACTIONS[6] },
 			},
 		]);
+	});
+});
+
+describe("ReactionBar and the chat", () => {
+	it("marks itself while the chat is open, so narrow screens can hide it", async () => {
+		const { wrapper } = mountComponent(ReactionBar, {
+			props: { mode: "in-video", visible: true },
+		});
+		expect(wrapper.get('[data-cy="reaction-bar"]').classes()).not.toContain("chat-open");
+		chatOpen.value = true;
+		await wrapper.vm.$nextTick();
+		expect(wrapper.get('[data-cy="reaction-bar"]').classes()).toContain("chat-open");
+		chatOpen.value = false;
 	});
 });
 

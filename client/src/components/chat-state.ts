@@ -17,3 +17,6 @@ export const chatMessagePast: Ref<ChatMessage[]> = ref([]);
  * They will fade away after `MSG_SHOW_TIMEOUT` ms, and moved into `chatMessagePast`.
  */
 export const chatMessageRecent: Ref<ChatMessage[]> = ref([]);
+
+/** True while the chat is open for typing, so the reaction bar can give up its space on narrow screens. */
+export const chatOpen: Ref<boolean> = ref(false);
