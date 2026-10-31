@@ -1,4 +1,5 @@
 import permissions, { type GrantMask, Grants } from "ott-common/permissions.js";
+import { isReaction } from "ott-common/models/reactions.js";
 import { redisClient } from "./redisclient.js";
 import { getLogger } from "./logger.js";
 import type winston from "winston";
@@ -6,6 +7,7 @@ import type {
 	AddRequest,
 	ApplySettingsRequest,
 	ChatRequest,
+	ReactionRequest,
 	JoinRequest,
 	LeaveRequest,
 	OrderRequest,
@@ -79,6 +81,9 @@ import { canKickUser } from "ott-common/userutils.js";
 import { getSubtitleFormatFromUrl } from "ott-common/subtitles.js";
 import { conf } from "./ott-config.js";
 import { ALL_SKIP_CATEGORIES } from "ott-common/constants.js";
+
+/** Each client can send a reaction at most this often, so held taps cannot flood a room. */
+const REACTION_MIN_INTERVAL_MS = 120;
 
 /**
  * Represents a User from the Room's perspective.
@@ -231,6 +236,7 @@ export class Room implements RoomState {
 	isTemporary = false;
 	_owner: User | null = null;
 	grants: Grants = new Grants();
+	private lastReactionAt = new Map<ClientId, number>();
 	userRoles: Map<Role, Set<number>>;
 	_autoSkipSegmentCategories = Array.from(ALL_SKIP_CATEGORIES);
 	restoreQueueBehavior: BehaviorOption = BehaviorOption.Prompt;
@@ -1069,6 +1075,7 @@ export class Room implements RoomState {
 			[RoomRequestType.OrderRequest, "manage-queue.order"],
 			[RoomRequestType.VoteRequest, "manage-queue.vote"],
 			[RoomRequestType.ChatRequest, "chat"],
+			[RoomRequestType.ReactionRequest, "chat"],
 			[RoomRequestType.PlayNowRequest, "manage-queue.play-now"],
 			[RoomRequestType.ShuffleRequest, "manage-queue.order"],
 			[RoomRequestType.PlaybackSpeedRequest, "playback.speed"],
@@ -1101,6 +1108,7 @@ export class Room implements RoomState {
 			[RoomRequestType.PromoteRequest]: "promoteUser",
 			[RoomRequestType.UpdateUser]: "updateUser",
 			[RoomRequestType.ChatRequest]: "chat",
+			[RoomRequestType.ReactionRequest]: "react",
 			[RoomRequestType.UndoRequest]: "undo",
 			[RoomRequestType.ApplySettingsRequest]: "applySettings",
 			[RoomRequestType.PlayNowRequest]: "playNow",
@@ -1354,6 +1362,7 @@ export class Room implements RoomState {
 			throw new Error("context.clientId was undefined");
 		}
 		const removed = this.getUserInfo(context.clientId);
+		this.lastReactionAt.delete(context.clientId);
 		// We must publish the event before removing the user, otherwise publishing the event will fail because the user is gone.
 		await this.publishRoomEvent(request, context, { user: removed });
 
@@ -1399,6 +1408,27 @@ export class Room implements RoomState {
 			action: "chat",
 			from: user,
 			text: request.text,
+		});
+	}
+
+	public async react(request: ReactionRequest, context: RoomRequestContext): Promise<void> {
+		if (context.clientId === undefined) {
+			throw new Error("context.clientId was undefined");
+		}
+		if (!isReaction(request.emoji)) {
+			this.log.debug(`ignoring unknown reaction from client ${context.clientId}`);
+			return;
+		}
+		const now = Date.now();
+		const last = this.lastReactionAt.get(context.clientId);
+		if (last !== undefined && now - last < REACTION_MIN_INTERVAL_MS) {
+			return;
+		}
+		this.lastReactionAt.set(context.clientId, now);
+		await this.publish({
+			action: "reaction",
+			from: this.getUserInfo(context.clientId),
+			emoji: request.emoji,
 		});
 	}
 

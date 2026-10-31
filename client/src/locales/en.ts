@@ -197,6 +197,8 @@ export default {
 		"mute-volume": "Mute",
 		"close-chat": "Close chat",
 		"open-chat": "Open chat",
+		"react": "React with {emoji}",
+		"reactions": "Reactions",
 		"scroll-chat-bottom": "Scroll to bottom",
 		"shuffle-queue": "Shuffle queue",
 		"switch-layout": "Switch layout",

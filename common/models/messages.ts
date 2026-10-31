@@ -13,11 +13,13 @@ import type {
 	BehaviorOption,
 } from "./types.js";
 import type { QueueItem, QueueItemExtras, VideoId, VideoAdd } from "./video.js";
+import type { Reaction } from "./reactions.js";
 
 export type ServerMessage =
 	| ServerMessageSync
 	| ServerMessageUnload
 	| ServerMessageChat
+	| ServerMessageReaction
 	| ServerMessageEvent
 	| ServerMessageEventCustom
 	| ServerMessageAnnouncement
@@ -67,6 +69,12 @@ export interface ServerMessageChat extends ServerMessageBase {
 	action: "chat";
 	from: RoomUserInfo;
 	text: string;
+}
+
+export interface ServerMessageReaction extends ServerMessageBase {
+	action: "reaction";
+	from: RoomUserInfo;
+	emoji: Reaction;
 }
 
 export interface ServerMessageEvent extends ServerMessageBase {
@@ -205,7 +213,8 @@ export type RoomRequest =
 	| PlaybackSpeedRequest
 	| RestoreQueueRequest
 	| KickRequest
-	| UpdateQueueItemRequest;
+	| UpdateQueueItemRequest
+	| ReactionRequest;
 
 export enum RoomRequestType {
 	JoinRequest,
@@ -228,6 +237,7 @@ export enum RoomRequestType {
 	RestoreQueueRequest,
 	KickRequest,
 	UpdateQueueItemRequest,
+	ReactionRequest,
 }
 
 export interface RoomRequestBase {
@@ -304,6 +314,11 @@ export interface UpdateUser extends RoomRequestBase {
 export interface ChatRequest extends RoomRequestBase {
 	type: RoomRequestType.ChatRequest;
 	text: string;
+}
+
+export interface ReactionRequest extends RoomRequestBase {
+	type: RoomRequestType.ReactionRequest;
+	emoji: Reaction;
 }
 
 export interface UndoRequest extends RoomRequestBase {

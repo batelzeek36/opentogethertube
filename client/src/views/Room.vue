@@ -75,6 +75,8 @@
 						>
 							<Chat ref="chat" @link-click="setAddPreviewText" />
 						</div>
+						<ReactionOverlay />
+						<ReactionBar :mode="controlsMode" :visible="controlsVisible" />
 						<div
 							class="absolute inset-0 z-200 flex items-center justify-center"
 							v-if="mediaPlaybackBlocked"
@@ -277,6 +279,8 @@ import { calculateCurrentPosition } from "ott-common/timestamp";
 import _ from "lodash";
 import OmniPlayer from "@/components/players/OmniPlayer.vue";
 import Chat from "@/components/Chat.vue";
+import ReactionBar from "@/components/ReactionBar.vue";
+import ReactionOverlay from "@/components/ReactionOverlay.vue";
 import UserList from "@/components/UserList.vue";
 import VideoQueue from "@/components/VideoQueue.vue";
 import RoomSettingsForm from "@/components/RoomSettingsForm.vue";
@@ -318,6 +322,8 @@ export default defineComponent({
 		VideoQueue,
 		OmniPlayer,
 		Chat,
+		ReactionBar,
+		ReactionOverlay,
 		AddPreview,
 		UserList,
 		RoomSettingsForm,
