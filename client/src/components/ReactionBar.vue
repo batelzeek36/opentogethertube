@@ -3,7 +3,7 @@
 		v-if="canReact"
 		v-show="visible"
 		class="reaction-bar"
-		:class="mode"
+		:class="[mode, { 'chat-open': chatOpen }]"
 		role="group"
 		:aria-label="$t('room.reactions')"
 		data-cy="reaction-bar"
@@ -28,6 +28,7 @@ import { REACTIONS } from "ott-common/models/reactions";
 import { useConnection } from "@/plugins/connection";
 import { useGrants } from "@/components/composables/grants";
 import { useRoomApi } from "@/util/roomapi";
+import { chatOpen } from "./chat-state";
 
 defineProps<{
 	mode: "in-video" | "outside-video";
@@ -61,6 +62,13 @@ const canReact = computed(() => granted("chat"));
 
 .reaction-bar.outside-video {
 	bottom: 10px;
+}
+
+/* The open chat's input sits at this height on narrow screens. */
+@media (max-width: 1023.98px) {
+	.reaction-bar.chat-open {
+		display: none;
+	}
 }
 
 .reaction-button {

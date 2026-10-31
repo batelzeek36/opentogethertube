@@ -86,9 +86,10 @@ import type { ServerMessageChat } from "ott-common/models/messages";
 import { useRoomKeyboardShortcuts } from "@/util/keyboard-shortcuts";
 import { useSfx } from "@/plugins/sfx";
 import ChatMsg from "./ChatMsg.vue";
-import { chatMessagePast, chatMessageRecent } from "./chat-state";
+import { chatMessagePast, chatMessageRecent, chatOpen } from "./chat-state";
 
 const MSG_SHOW_TIMEOUT = 20000;
+const KEYBOARD_MIN_HEIGHT = 100;
 
 const emit = defineEmits(["link-click"]);
 const props = defineProps({
@@ -130,6 +131,7 @@ function getChatInputEl(): HTMLInputElement | undefined {
 const shortcuts = useRoomKeyboardShortcuts();
 onMounted(() => {
 	connection.addMessageHandler("chat", onChatReceived);
+	window.visualViewport?.addEventListener("resize", onViewportResize);
 	if (shortcuts) {
 		shortcuts.bind({ code: "KeyT" }, () => setActivated(true, false));
 	} else {
@@ -139,17 +141,47 @@ onMounted(() => {
 
 onUnmounted(() => {
 	connection.removeMessageHandler("chat", onChatReceived);
+	window.visualViewport?.removeEventListener("resize", onViewportResize);
+	chatOpen.value = false;
 });
 
 function focusChatInput() {
 	getChatInputEl()?.focus();
 }
 
+/**
+ * A phone's browser scrolls the page to keep the input above the keyboard and leaves it there
+ * when the keyboard closes, with the top of the video stuck under the sticky header.
+ */
+let scrollBeforeChat: number | null = null;
+function restoreScroll() {
+	if (scrollBeforeChat !== null) {
+		window.scrollTo({ top: scrollBeforeChat });
+	}
+}
+let viewportHeight = window.visualViewport?.height ?? 0;
+function onViewportResize() {
+	const height = window.visualViewport?.height ?? 0;
+	const keyboardClosed = height - viewportHeight > KEYBOARD_MIN_HEIGHT;
+	viewportHeight = height;
+	if (keyboardClosed && activated.value) {
+		restoreScroll();
+	}
+}
+
 async function setActivated(value: boolean, manual = false): Promise<void> {
 	if (!value && props.alwaysVisible) {
 		return;
 	}
+	if (value && !activated.value) {
+		scrollBeforeChat = window.scrollY;
+	}
 	activated.value = value;
+	chatOpen.value = value;
+	if (!value) {
+		restoreScroll();
+		scrollBeforeChat = null;
+	}
 	if (value) {
 		if (manual) {
 			deactivateOnBlur.value = false;

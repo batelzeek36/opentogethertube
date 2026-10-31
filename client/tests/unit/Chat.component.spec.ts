@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	RoomRequestType,
 	type ClientMessageRoomRequest,
@@ -20,6 +20,18 @@ describe("Chat component", () => {
 		await wrapper.get('[data-cy="chat-deactivate"]').trigger("click");
 		expect(wrapper.find('[data-cy="chat-activate"]').exists()).toBe(true);
 		expect(wrapper.find('[data-cy="chat-input"]').exists()).toBe(false);
+	});
+
+	it("puts the page back where it was when the chat closes", async () => {
+		const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+		Object.defineProperty(window, "scrollY", { configurable: true, value: 120 });
+		const { wrapper } = mountComponent(Chat);
+		await wrapper.get('[data-cy="chat-activate"]').trigger("click");
+		Object.defineProperty(window, "scrollY", { configurable: true, value: 500 });
+		await wrapper.get('[data-cy="chat-deactivate"]').trigger("click");
+		expect(scrollTo).toHaveBeenCalledWith({ top: 120 });
+		scrollTo.mockRestore();
+		Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
 	});
 
 	it("sends the message when enter is pressed", async () => {
