@@ -75,9 +75,7 @@ const label = computed(() => {
 /*
  * The release is listened for on the window as well as captured on the button: wherever the finger
  * or mouse ends up, and even if the button gets disabled under it, letting go is always seen.
- * Touch and mouse events are here too because Firefox on Android never sent pointerup after a long
- * press (seen on the S25), which left the mic on until the time limit. touchstart.prevent on the
- * button stops that long press from starting.
+ * Touch and mouse events are here too, as a backstop for any browser that drops a pointer event.
  */
 const RELEASE_EVENTS = ["pointerup", "pointercancel", "touchend", "touchcancel", "mouseup"];
 
@@ -134,6 +132,14 @@ onUnmounted(onPointerUp);
 	-webkit-user-select: none;
 	-webkit-touch-callout: none;
 	-webkit-tap-highlight-color: transparent;
+}
+
+/*
+ * Touches must land on the button, never on its label. The label's text changes during a press, and
+ * Firefox on Android stops reporting a touch whose text was replaced, so letting go was never seen.
+ */
+.voice-talk > * {
+	pointer-events: none;
 }
 
 .voice-talk-floating {
