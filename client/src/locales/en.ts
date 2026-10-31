@@ -190,6 +190,8 @@ export default {
 		"next-video-vote": "Vote to skip video",
 		"toggle-fullscreen": "Toggle fullscreen",
 		pip: "Picture in Picture",
+		"movie-only": "Movie only",
+		"show-controls": "Show controls",
 		"player-settings": "Player settings",
 		subtitles: "Subtitles/CC",
 		quality: "Quality",

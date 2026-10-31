@@ -52,11 +52,11 @@
 			>
 				<div
 					class="relative z-31 flex h-full flex-col group-data-[fullscreen=true]/room:max-h-screen group-data-[fullscreen=true]/room:w-full! group-data-[fullscreen=true]/room:p-0 group-data-[layout=default]/room:w-4/5 group-data-[layout=default]/room:justify-self-center group-data-[layout=default]/room:max-xl:w-full"
-					:class="{ 'typing-view': typingView }"
+					:class="{ 'typing-view': typingView, 'movie-only-stage': movieOnly }"
 					:style="typingStyle"
 				>
 					<div
-						class="size-full group-data-[fullscreen=true]/room:h-screen"
+						class="movie-only-player size-full group-data-[fullscreen=true]/room:h-screen"
 						ref="playerContainer"
 					>
 						<OmniPlayer
@@ -77,10 +77,20 @@
 						>
 							<Chat ref="chat" @link-click="setAddPreviewText" />
 						</div>
+						<MovieOnlyButton v-show="controlsVisible" @click="enterMovieOnly" />
+						<MovieOnlyLayer
+							v-if="movieOnly"
+							:revealed="movieOnlyRevealed"
+							:take-focus="movieOnlyRevealedByKey"
+							:playback-blocked="mediaPlaybackBlocked"
+							@tap="onMovieOnlyTap"
+							@show-controls="onShowControlsPressed"
+						/>
 						<ReactionOverlay />
 						<ReactionBar :mode="controlsMode" :visible="controlsVisible" />
 						<div
-							class="absolute inset-0 z-200 flex items-center justify-center"
+							class="movie-only-play absolute inset-0 z-200 flex items-center justify-center"
+							data-movie-only-keep
 							v-if="mediaPlaybackBlocked"
 						>
 							<Button size="xl" variant="default" @click="onClickUnblockPlayback">
@@ -99,7 +109,9 @@
 				</div>
 				<div
 					class="pointer-events-none h-75 min-h-25 w-100 px-2.5 py-1.25 max-lg:w-full"
-					v-if="controlsMode === 'outside-video' && !store.state.fullscreen"
+					v-if="
+						controlsMode === 'outside-video' && (!store.state.fullscreen || movieOnly)
+					"
 				>
 					<Chat ref="chat" always-visible @link-click="setAddPreviewText" />
 				</div>
@@ -283,6 +295,9 @@ import OmniPlayer from "@/components/players/OmniPlayer.vue";
 import Chat from "@/components/Chat.vue";
 import ReactionBar from "@/components/ReactionBar.vue";
 import { useTypingView } from "@/components/composables/typing-view";
+import { useMovieOnly } from "@/components/composables/movie-only";
+import MovieOnlyButton from "@/components/MovieOnlyButton.vue";
+import MovieOnlyLayer from "@/components/MovieOnlyLayer.vue";
 import ReactionOverlay from "@/components/ReactionOverlay.vue";
 import UserList from "@/components/UserList.vue";
 import VideoQueue from "@/components/VideoQueue.vue";
@@ -322,6 +337,8 @@ export default defineComponent({
 	name: "room",
 	components: {
 		VideoControls,
+		MovieOnlyButton,
+		MovieOnlyLayer,
 		VideoQueue,
 		OmniPlayer,
 		Chat,
@@ -668,6 +685,24 @@ export default defineComponent({
 			() => window.matchMedia("only screen and (max-width: 760px)").matches,
 		);
 		const orientation = useScreenOrientation();
+		const movieOnly = useMovieOnly({ followsRotation: () => isMobile.value });
+		// Being kicked replaces the room with a message that has to be read.
+		watch(showDisconnectedOverlay, disconnected => {
+			if (disconnected) {
+				movieOnly.exit();
+			}
+		});
+		// The button she pressed says "Show controls".
+		watch(movieOnly.active, active => {
+			if (active) {
+				return;
+			}
+			if (store.state.room.isPlaying) {
+				activateVideoControls();
+			} else {
+				setVideoControlsVisibility(true);
+			}
+		});
 		const queueTab = ref<QueueTab>("queue");
 		const roomSettingsForm = ref<typeof RoomSettingsForm | null>(null);
 
@@ -677,7 +712,7 @@ export default defineComponent({
 			}
 
 			watch(orientation.orientation, async newOrientation => {
-				if (!newOrientation) {
+				if (!newOrientation || movieOnly.active.value) {
 					return;
 				}
 				if (isMobile.value) {
@@ -835,6 +870,12 @@ export default defineComponent({
 			controlsVisible,
 			typingView,
 			typingStyle,
+			movieOnly: movieOnly.active,
+			movieOnlyRevealed: movieOnly.revealed,
+			movieOnlyRevealedByKey: movieOnly.revealedByKey,
+			enterMovieOnly: movieOnly.enter,
+			onMovieOnlyTap: movieOnly.onTap,
+			onShowControlsPressed: movieOnly.onShowControlsPressed,
 			videoControlsHideTimeout,
 			controlsMode,
 
@@ -1010,5 +1051,69 @@ export default defineComponent({
 	.typing-view .chat-header {
 		top: 2px;
 	}
+}
+
+/*
+ * Movie only: the page hides everything, whatever it holds now or later, and only the picture and
+ * what has to be pressed on this screen opt back in. See useMovieOnly.
+ */
+html.movie-only,
+html.movie-only body {
+	overflow: hidden !important;
+	overscroll-behavior: none;
+	scrollbar-width: none;
+	background: #000 !important;
+}
+
+html.movie-only::-webkit-scrollbar,
+html.movie-only body::-webkit-scrollbar {
+	display: none;
+}
+
+html.movie-only body * {
+	visibility: hidden !important;
+}
+
+/* A hard cut: chat messages transition "all" over a second, visibility included. */
+html.movie-only body *:not([data-movie-only-keep]) {
+	transition: none !important;
+}
+
+html.movie-only .player video,
+html.movie-only .player iframe,
+html.movie-only .player canvas,
+html.movie-only [data-movie-only-keep],
+html.movie-only [data-movie-only-keep] * {
+	visibility: visible !important;
+}
+
+html.movie-only .movie-only-stage {
+	position: fixed !important;
+	inset: 0 !important;
+	z-index: 2147483000;
+	/* Sized outright: the default layout justify-self would shrink an auto width to nothing. */
+	width: 100% !important;
+	height: 100% !important;
+	max-height: none !important;
+}
+
+html.movie-only .movie-only-player {
+	position: absolute;
+	inset: 0;
+	width: 100% !important;
+	height: 100% !important;
+}
+
+/* PLAY covers the screen to center itself, but only the button should catch a tap. */
+html.movie-only .movie-only-play {
+	pointer-events: none;
+}
+
+html.movie-only .movie-only-play button {
+	pointer-events: auto;
+}
+
+.typing-view .movie-only-button {
+	display: none;
 }
 </style>
