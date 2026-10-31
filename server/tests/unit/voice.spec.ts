@@ -63,6 +63,17 @@ describe("VoiceChannels", () => {
 			expect(channel("side").members).toEqual(["b"]);
 		});
 
+		it("gives one person one seat, so a second tab cannot play their own voice to them", () => {
+			people.set("a2", "person-a");
+			voice.join("a", "main");
+			voice.startTalk("a");
+			voice.join("a2", "side");
+			expect(channel("main").members).toEqual([]);
+			expect(channel("side").members).toEqual(["a2"]);
+			voice.join("b", "side");
+			expect(channel("side").members).toEqual(["a2", "b"]);
+		});
+
 		it("moves a client that joins another channel, ending their turn there", () => {
 			voice.join("a", "main");
 			voice.startTalk("a");

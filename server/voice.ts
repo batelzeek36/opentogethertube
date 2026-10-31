@@ -74,9 +74,22 @@ export class VoiceChannels {
 			this.publishState();
 			return;
 		}
+		this.leaveOtherSeatsOf(person, clientId);
 		this.endTurnOf(clientId, "left");
 		this.members.set(clientId, channel);
 		this.publishState();
+	}
+
+	/**
+	 * One seat per person. Audio goes to every member but the talking client, so a second tab on the
+	 * same phone played a person's own voice back into their mic (seen on the S25).
+	 */
+	private leaveOtherSeatsOf(person: string, clientId: ClientId): void {
+		for (const memberId of [...this.members.keys()]) {
+			if (memberId !== clientId && this.host.personKey(memberId) === person) {
+				this.leave(memberId);
+			}
+		}
 	}
 
 	/** Leave voice. Called for a Leave tap and when the client leaves the room. */
