@@ -16,6 +16,10 @@ export interface OttRoomConnection {
 	reconnect(): void;
 	disconnect(): void;
 	send(message: ClientMessage): void;
+	/** Send audio. Returns false if it was dropped, because late audio is worse than a gap. */
+	sendBinary(data: ArrayBuffer): boolean;
+	/** Receive audio. Binary messages are never parsed or logged. */
+	setBinaryHandler(handler: ((data: ArrayBuffer) => void) | null): void;
 	addMessageHandler(action: ServerMessageActionType, handler: (msg: ServerMessage) => void): void;
 	removeMessageHandler(
 		action: ServerMessageActionType,
@@ -54,6 +58,9 @@ export interface ConnectionEventKicked {
 	reason: OttWebsocketError;
 }
 
+/** Roughly half a second of audio. Past this the network is behind and new audio is dropped. */
+const MAX_BUFFERED_BYTES_FOR_BINARY = 16 * 1024;
+
 function getReconnectDelayMs(
 	reconnectAttempts: number,
 	reconnectDelay: number,
@@ -79,6 +86,7 @@ class OttRoomConnectionReal implements OttRoomConnection {
 	kickReason: Ref<OttWebsocketError | null> = ref(null);
 
 	private socket: WebSocket | null = null;
+	private binaryHandler: ((data: ArrayBuffer) => void) | null = null;
 	private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	private messageHandlers = new Map<ServerMessageActionType, ((msg: ServerMessage) => void)[]>();
 	private eventHandlers = new Map<ConnectionEventKind, ((e: unknown) => void)[]>();
@@ -114,6 +122,7 @@ class OttRoomConnectionReal implements OttRoomConnection {
 
 	private doConnect(url: string) {
 		this.socket = new WebSocket(url);
+		this.socket.binaryType = "arraybuffer";
 		console.debug(`connecting to ${url}`);
 		this.socket.addEventListener("open", () => this.onOpen());
 		this.socket.addEventListener("close", e => this.onClose(e));
@@ -130,6 +139,23 @@ class OttRoomConnectionReal implements OttRoomConnection {
 		}
 		const text = JSON.stringify(message);
 		this.socket!.send(text);
+	}
+
+	sendBinary(data: ArrayBuffer): boolean {
+		const socket = this.socket;
+		if (
+			!socket ||
+			socket.readyState !== WebSocket.OPEN ||
+			socket.bufferedAmount > MAX_BUFFERED_BYTES_FOR_BINARY
+		) {
+			return false;
+		}
+		socket.send(data);
+		return true;
+	}
+
+	setBinaryHandler(handler: ((data: ArrayBuffer) => void) | null): void {
+		this.binaryHandler = handler;
 	}
 
 	disconnect() {
@@ -183,7 +209,9 @@ class OttRoomConnectionReal implements OttRoomConnection {
 	}
 
 	private onMessage(e: { data: string | unknown }) {
-		if (typeof e.data === "string") {
+		if (e.data instanceof ArrayBuffer) {
+			this.binaryHandler?.(e.data);
+		} else if (typeof e.data === "string") {
 			try {
 				const msg = JSON.parse(e.data) as ServerMessage;
 				this.handleMessage(msg);
@@ -264,10 +292,13 @@ export class OttRoomConnectionMock implements OttRoomConnection {
 	kickReason: Ref<OttWebsocketError | null> = ref(null);
 
 	sent: ClientMessage[] = [];
+	sentBinary: ArrayBuffer[] = [];
+	binaryHandler: ((data: ArrayBuffer) => void) | null = null;
 	private messageHandlers = new Map<ServerMessageActionType, ((msg: ServerMessage) => void)[]>();
 
 	public mockReset() {
 		this.sent = [];
+		this.sentBinary = [];
 	}
 
 	public mockReceive(msg: ServerMessage) {
@@ -282,6 +313,15 @@ export class OttRoomConnectionMock implements OttRoomConnection {
 	public disconnect() {}
 	public send(message: ClientMessage) {
 		this.sent.push(message);
+	}
+
+	public sendBinary(data: ArrayBuffer): boolean {
+		this.sentBinary.push(data);
+		return true;
+	}
+
+	public setBinaryHandler(handler: ((data: ArrayBuffer) => void) | null): void {
+		this.binaryHandler = handler;
 	}
 
 	public addMessageHandler(

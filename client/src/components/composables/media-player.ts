@@ -41,6 +41,16 @@ export function useVolume() {
 	return { volume, prevVolume, isMuted };
 }
 
+const volumeDuck = ref(1);
+
+/**
+ * A multiplier on the player's volume, for dipping the movie while someone talks. It is separate
+ * from the person's volume, which it never changes, so 1 always means exactly their own volume.
+ */
+export function useVolumeDuck() {
+	return volumeDuck;
+}
+
 export interface MediaPlayer {
 	/**
 	 * Play the video.

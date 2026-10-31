@@ -109,6 +109,12 @@
 						{{ $t("room-settings.enable-vote-skip") }}
 					</Label>
 				</div>
+				<VoiceRoomSettings
+					v-model:enabled="settings.voiceEnabled.value"
+					v-model:max-talk="settings.voiceMaxTalkSeconds.value"
+					v-model:slow-mode="settings.voiceSlowModeSeconds.value"
+					:disabled="!granted('configure-room.voice')"
+				/>
 				<PermissionsEditor
 					v-if="store.state.user && store.state.room.hasOwner"
 					v-model="settings.grants.value as Grants"
@@ -191,6 +197,8 @@ import { useRoute } from "vue-router";
 import { watch } from "vue";
 import { watchDebounced } from "@vueuse/core";
 import AutoSkipSegmentSettings from "./AutoSkipSegmentSettings.vue";
+import VoiceRoomSettings from "./VoiceRoomSettings.vue";
+import { VOICE_RULE_DEFAULTS } from "ott-common/models/voice";
 
 const store = useStore();
 const { t } = useI18n();
@@ -240,6 +248,7 @@ const inputRoomSettings = reactive<RoomSettings>({
 	autoSkipSegmentCategories: Array.from([]),
 	restoreQueueBehavior: BehaviorOption.Prompt,
 	enableVoteSkip: false,
+	...VOICE_RULE_DEFAULTS,
 });
 
 const settings = toRefs(inputRoomSettings);
@@ -304,6 +313,9 @@ function getRoomSettingsSubmit(): Partial<RoomSettings> {
 		autoSkipSegmentCategories: "other",
 		restoreQueueBehavior: "other",
 		enableVoteSkip: "other",
+		voiceEnabled: "voice",
+		voiceMaxTalkSeconds: "voice",
+		voiceSlowModeSeconds: "voice",
 	};
 	const blocked: (keyof RoomSettings)[] = [];
 	for (const prop of Object.keys(propsToGrants)) {
