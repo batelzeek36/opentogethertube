@@ -85,6 +85,7 @@ import { useRoomApi } from "@/util/roomapi";
 import type { ServerMessageChat } from "ott-common/models/messages";
 import { useRoomKeyboardShortcuts } from "@/util/keyboard-shortcuts";
 import { useSfx } from "@/plugins/sfx";
+import { movieOnlyActive } from "./composables/movie-only";
 import ChatMsg from "./ChatMsg.vue";
 import { chatMessagePast, chatMessageRecent, chatOpen } from "./chat-state";
 
@@ -201,7 +202,10 @@ function onChatReceived(msg: ServerMessageChat): void {
 	chatMessageRecent.value.push(msg);
 	setTimeout(expireChatMessage, MSG_SHOW_TIMEOUT);
 	nextTick(enforceStickToBottom);
-	sfx.play("pop");
+	// The TV should only be heard playing the movie.
+	if (!movieOnlyActive.value) {
+		sfx.play("pop");
+	}
 }
 
 function expireChatMessage() {
