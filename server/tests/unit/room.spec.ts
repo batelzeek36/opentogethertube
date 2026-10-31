@@ -392,6 +392,53 @@ describe("Room", () => {
 			});
 		});
 
+		describe("ReactionRequest", () => {
+			const context = { username: "test", role: Role.UnregisteredUser, clientId: "user" };
+
+			it("publishes a known reaction to the room", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				await room.processRequest(
+					{ type: RoomRequestType.ReactionRequest, emoji: "🎃" },
+					context,
+				);
+				expect(publish).toHaveBeenCalledWith(
+					expect.objectContaining({ action: "reaction", emoji: "🎃" }),
+				);
+			});
+
+			it("ignores anything outside the reaction list", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				await room.processRequest(
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					{ type: RoomRequestType.ReactionRequest, emoji: "<img src=x>" as any },
+					context,
+				);
+				expect(publish).not.toHaveBeenCalled();
+			});
+
+			it("drops a client's reactions sent too close together, but not another client's", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				const other = new RoomUser("other", "b");
+				room.realusers.push(other);
+				const request = { type: RoomRequestType.ReactionRequest, emoji: "🔥" } as const;
+				await room.processRequest(request, context);
+				await room.processRequest(request, context);
+				expect(publish).toHaveBeenCalledTimes(1);
+				await room.processRequest(request, { ...context, clientId: "other" });
+				expect(publish).toHaveBeenCalledTimes(2);
+			});
+
+			it("refuses a role without the chat permission", async () => {
+				room.grants.setRoleGrants(Role.UnregisteredUser, 0);
+				await expect(
+					room.processRequest(
+						{ type: RoomRequestType.ReactionRequest, emoji: "🔥" },
+						context,
+					),
+				).rejects.toThrow();
+			});
+		});
+
 		describe("VoteRequest", () => {
 			it("should only cast one vote when a video is voted for the first time", async () => {
 				await room.processRequest(

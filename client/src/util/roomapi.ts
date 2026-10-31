@@ -2,6 +2,7 @@ import type { OttRoomConnection } from "@/plugins/connection";
 import { type ClientMessageNotify, RoomRequestType } from "ott-common/models/messages";
 import type { ClientId, Role } from "ott-common/models/types";
 import type { VideoId } from "ott-common/models/video";
+import type { Reaction } from "ott-common/models/reactions";
 
 export function useRoomApi(connection: OttRoomConnection) {
 	return new RoomApi(connection);
@@ -89,6 +90,16 @@ class RoomApi {
 				type: RoomRequestType.PromoteRequest,
 				targetClientId: clientId,
 				role,
+			},
+		});
+	}
+
+	react(emoji: Reaction) {
+		this.connection.send({
+			action: "req",
+			request: {
+				type: RoomRequestType.ReactionRequest,
+				emoji,
 			},
 		});
 	}
