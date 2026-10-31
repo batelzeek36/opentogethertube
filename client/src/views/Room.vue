@@ -52,6 +52,8 @@
 			>
 				<div
 					class="relative z-31 flex h-full flex-col group-data-[fullscreen=true]/room:max-h-screen group-data-[fullscreen=true]/room:w-full! group-data-[fullscreen=true]/room:p-0 group-data-[layout=default]/room:w-4/5 group-data-[layout=default]/room:justify-self-center group-data-[layout=default]/room:max-xl:w-full"
+					:class="{ 'typing-view': typingView }"
+					:style="typingStyle"
 				>
 					<div
 						class="size-full group-data-[fullscreen=true]/room:h-screen"
@@ -70,7 +72,7 @@
 							:class="{ hidden: controlsVisible }"
 						></div>
 						<div
-							class="pointer-events-none absolute bottom-20 right-0 h-[70%] min-h-17.5 w-100 px-2.5 py-1.25 max-lg:w-62.5"
+							class="typing-chat pointer-events-none absolute bottom-20 right-0 h-[70%] min-h-17.5 w-100 px-2.5 py-1.25 max-lg:w-62.5"
 							v-if="controlsMode === 'in-video'"
 						>
 							<Chat ref="chat" @link-click="setAddPreviewText" />
@@ -280,6 +282,7 @@ import _ from "lodash";
 import OmniPlayer from "@/components/players/OmniPlayer.vue";
 import Chat from "@/components/Chat.vue";
 import ReactionBar from "@/components/ReactionBar.vue";
+import { useTypingView } from "@/components/composables/typing-view";
 import ReactionOverlay from "@/components/ReactionOverlay.vue";
 import UserList from "@/components/UserList.vue";
 import VideoQueue from "@/components/VideoQueue.vue";
@@ -360,6 +363,7 @@ export default defineComponent({
 		const route = useRoute();
 
 		// video control visibility
+		const { typingView, typingStyle } = useTypingView();
 		const controlsVisible = ref(true);
 		const videoControlsHideTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
 		const playerContainer = useTemplateRef<HTMLDivElement>("playerContainer");
@@ -829,6 +833,8 @@ export default defineComponent({
 			isOfficialSite,
 
 			controlsVisible,
+			typingView,
+			typingStyle,
 			videoControlsHideTimeout,
 			controlsMode,
 
@@ -879,3 +885,130 @@ export default defineComponent({
 	},
 });
 </script>
+
+<style>
+/* The whole movie frame and the chat, in the space above a phone's keyboard. See useTypingView. */
+.typing-view {
+	--typing-chat-height: 112px;
+	--typing-chat-width: 42%;
+
+	position: fixed !important;
+	z-index: 60;
+	max-height: none !important;
+	background: #000;
+}
+
+.typing-view .video-controls-wrapper,
+.typing-view .reaction-bar,
+.typing-view #mouse-event-swallower {
+	display: none;
+}
+
+/*
+ * Portrait: the chat sits right under the frame rather than at the bottom of the space, because a
+ * phone's browser can report more room above the keyboard than it has (seen on the S25).
+ */
+.typing-view .player {
+	position: relative;
+	inset: auto;
+	flex: none;
+	width: 100%;
+	height: auto;
+	max-height: calc(100% - var(--typing-chat-height));
+	aspect-ratio: var(--video-aspect, 4 / 3);
+}
+
+/* OmniPlayer nests a second .player inside its root: only the root takes the sizes above. */
+.typing-view .player .player {
+	position: static;
+	inset: auto;
+	width: 100%;
+	height: 100%;
+	max-height: none;
+	aspect-ratio: auto;
+}
+
+.typing-view video {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+.typing-view .typing-chat {
+	position: relative;
+	inset: auto;
+	width: 100%;
+	height: var(--typing-chat-height);
+	min-height: 0;
+	padding: 0;
+	pointer-events: auto;
+}
+
+.typing-view .chat.activated {
+	position: relative;
+	margin: 0;
+	border: 0;
+	border-radius: 0;
+	background: #000;
+	backdrop-filter: none;
+}
+
+.typing-view .chat-header {
+	position: absolute;
+	top: 10px;
+	right: 2px;
+	z-index: 1;
+	padding: 0;
+	border: 0;
+}
+
+.typing-view .chat-header h4 {
+	display: none;
+}
+
+.typing-view .input-box {
+	order: -1;
+	flex: none;
+	padding-right: 34px;
+}
+
+@media (orientation: portrait) {
+	.typing-view > div:first-child {
+		display: flex;
+		flex-direction: column;
+	}
+}
+
+@media (orientation: landscape) {
+	.typing-view .player {
+		position: absolute;
+		inset: 0 var(--typing-chat-width) 0 0;
+		width: auto;
+		max-height: none;
+		aspect-ratio: auto;
+	}
+
+	.typing-view .player .player {
+		position: static;
+		inset: auto;
+		width: 100%;
+		height: 100%;
+	}
+
+	.typing-view .typing-chat {
+		position: absolute;
+		inset: 0 0 0 auto;
+		width: var(--typing-chat-width);
+		height: 100%;
+	}
+
+	.typing-view .input-box {
+		order: 0;
+		padding-right: 0;
+	}
+
+	.typing-view .chat-header {
+		top: 2px;
+	}
+}
+</style>
