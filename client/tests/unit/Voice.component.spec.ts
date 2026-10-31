@@ -227,6 +227,14 @@ describe("voice", () => {
 		it.each([
 			["the finger is released anywhere", () => window.dispatchEvent(new Event("pointerup"))],
 			[
+				"the browser only reports touchend",
+				() => window.dispatchEvent(new Event("touchend")),
+			],
+			[
+				"the browser reports touchcancel",
+				() => window.dispatchEvent(new Event("touchcancel")),
+			],
+			[
 				"the browser cancels the touch",
 				() => window.dispatchEvent(new Event("pointercancel")),
 			],

@@ -19,6 +19,8 @@
 		:aria-pressed="voice.holding.value"
 		data-cy="voice-talk"
 		@pointerdown="onPointerDown"
+		@touchstart.prevent
+		@lostpointercapture="onPointerUp"
 		@keydown="onKeyDown"
 		@keyup="onKeyUp"
 		@blur="voice.release"
@@ -73,10 +75,16 @@ const label = computed(() => {
 /*
  * The release is listened for on the window as well as captured on the button: wherever the finger
  * or mouse ends up, and even if the button gets disabled under it, letting go is always seen.
+ * Touch and mouse events are here too because Firefox on Android never sent pointerup after a long
+ * press (seen on the S25), which left the mic on until the time limit. touchstart.prevent on the
+ * button stops that long press from starting.
  */
+const RELEASE_EVENTS = ["pointerup", "pointercancel", "touchend", "touchcancel", "mouseup"];
+
 function onPointerUp() {
-	window.removeEventListener("pointerup", onPointerUp);
-	window.removeEventListener("pointercancel", onPointerUp);
+	for (const name of RELEASE_EVENTS) {
+		window.removeEventListener(name, onPointerUp);
+	}
 	voice.release();
 }
 
@@ -87,8 +95,9 @@ function onPointerDown(e: PointerEvent) {
 	// Stops the browser turning this press into a text selection or a focus scroll.
 	e.preventDefault();
 	(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-	window.addEventListener("pointerup", onPointerUp);
-	window.addEventListener("pointercancel", onPointerUp);
+	for (const name of RELEASE_EVENTS) {
+		window.addEventListener(name, onPointerUp);
+	}
 	voice.press();
 }
 
