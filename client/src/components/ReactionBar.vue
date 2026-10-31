@@ -64,6 +64,13 @@ const canReact = computed(() => granted("chat"));
 	bottom: 10px;
 }
 
+/* The open chat's input sits at this height on narrow screens. */
+@media (max-width: 1023.98px) {
+	.reaction-bar.chat-open {
+		display: none;
+	}
+}
+
 .reaction-button {
 	font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
 	flex: none;
