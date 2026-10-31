@@ -207,6 +207,7 @@ export async function unloadRoom(
 	if (reason !== UnloadReason.Commanded) {
 		await room.onBeforeUnload();
 	}
+	room.voice.dispose();
 	idx = rooms[idx].name === room.name ? idx : rooms.indexOf(room); // because the index may have changed across await boundaries
 	rooms.splice(idx, 1);
 	if (!opts.preserveRedis) {
@@ -230,6 +231,12 @@ export function clearRooms(): void {
 export async function unloadAllRooms(): Promise<void> {
 	const names = rooms.map(r => r.name);
 	await Promise.all(names.map(name => unloadRoom(name, UnloadReason.Admin)));
+}
+
+/** Get a room only if it is loaded on this node, without touching anything asynchronous. */
+export function getLoadedRoom(roomName: string): Room | undefined {
+	const name = roomName.toLowerCase();
+	return rooms.find(room => room.name.toLowerCase() === name);
 }
 
 export function publish(roomName: string, msg: ServerMessage) {
@@ -295,6 +302,7 @@ const roommanager = {
 
 	createRoom,
 	getRoom,
+	getLoadedRoom,
 	unloadRoom,
 	clearRooms,
 	unloadAllRooms,

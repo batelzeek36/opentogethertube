@@ -120,6 +120,9 @@ function dbToRoomArgs(db: DbRoom): RoomOptions {
 		prevQueue: db.prevQueue,
 		restoreQueueBehavior: db.restoreQueueBehavior,
 		enableVoteSkip: db.enableVoteSkip,
+		voiceEnabled: db.voiceEnabled,
+		voiceMaxTalkSeconds: db.voiceMaxTalkSeconds,
+		voiceSlowModeSeconds: db.voiceSlowModeSeconds,
 	};
 	for (let i = Role.TrustedUser; i <= 4; i++) {
 		room.userRoles.set(i, new Set(db[`role-${permissions.ROLE_NAMES[i]}`]));
@@ -151,6 +154,9 @@ export function roomToDb(room: RoomStatePersistable): Omit<RoomAttributes, "id">
 		prevQueue: room.prevQueue,
 		restoreQueueBehavior: room.restoreQueueBehavior,
 		enableVoteSkip: room.enableVoteSkip,
+		voiceEnabled: room.voiceEnabled,
+		voiceMaxTalkSeconds: room.voiceMaxTalkSeconds,
+		voiceSlowModeSeconds: room.voiceSlowModeSeconds,
 	};
 	if (room.owner) {
 		db.ownerId = room.owner.id;
@@ -183,6 +189,12 @@ export function roomToDbPartial(
 		},
 		v => !!v,
 	);
+	// Off and 0 are real values for these, so the truthy filter above must not drop them.
+	for (const rule of ["voiceEnabled", "voiceMaxTalkSeconds", "voiceSlowModeSeconds"] as const) {
+		if (room[rule] !== undefined) {
+			Object.assign(db, { [rule]: room[rule] });
+		}
+	}
 	// room.prevQueue will become null if its length is 0, so we need to explicitly check for null here
 	if (room.prevQueue || room.prevQueue === null) {
 		db.prevQueue = room.prevQueue;

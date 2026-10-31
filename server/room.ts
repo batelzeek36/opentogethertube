@@ -1,5 +1,8 @@
 import permissions, { type GrantMask, Grants } from "ott-common/permissions.js";
 import { isReaction } from "ott-common/models/reactions.js";
+import { VOICE_RULE_DEFAULTS } from "ott-common/models/voice.js";
+import { VoiceRulesSchema } from "ott-common/models/zod-schemas.js";
+import { VoiceChannels } from "./voice.js";
 import { redisClient } from "./redisclient.js";
 import { getLogger } from "./logger.js";
 import type winston from "winston";
@@ -8,6 +11,11 @@ import type {
 	ApplySettingsRequest,
 	ChatRequest,
 	ReactionRequest,
+	VoiceAllowRequest,
+	VoiceJoinRequest,
+	VoiceLeaveRequest,
+	VoiceRemoveRequest,
+	VoiceTalkRequest,
 	JoinRequest,
 	LeaveRequest,
 	OrderRequest,
@@ -55,6 +63,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import type { PickFunctions } from "ott-common/typeutils.js";
 import { replacer } from "ott-common/serialize.js";
 import {
+	BadApiArgumentException,
 	ClientNotFoundInRoomException,
 	ImpossiblePromotionException,
 	VideoAlreadyQueuedException,
@@ -184,6 +193,9 @@ const syncableProps: (keyof RoomStateSyncable)[] = [
 	"prevQueue",
 	"restoreQueueBehavior",
 	"enableVoteSkip",
+	"voiceEnabled",
+	"voiceMaxTalkSeconds",
+	"voiceSlowModeSeconds",
 	"votesToSkip",
 ];
 
@@ -208,6 +220,9 @@ const storableProps: (keyof RoomStateStorable)[] = [
 	"prevQueue",
 	"restoreQueueBehavior",
 	"enableVoteSkip",
+	"voiceEnabled",
+	"voiceMaxTalkSeconds",
+	"voiceSlowModeSeconds",
 ];
 
 /** Only these should be stored in persistent storage */
@@ -241,6 +256,24 @@ export class Room implements RoomState {
 	_autoSkipSegmentCategories = Array.from(ALL_SKIP_CATEGORIES);
 	restoreQueueBehavior: BehaviorOption = BehaviorOption.Prompt;
 	_enableVoteSkip: boolean = false;
+	_voiceEnabled: boolean = VOICE_RULE_DEFAULTS.voiceEnabled;
+	_voiceMaxTalkSeconds: number = VOICE_RULE_DEFAULTS.voiceMaxTalkSeconds;
+	_voiceSlowModeSeconds: number = VOICE_RULE_DEFAULTS.voiceSlowModeSeconds;
+	/** Who is in voice right now. Held in memory only, see VoiceChannels. */
+	voice = new VoiceChannels({
+		rules: () => ({
+			voiceEnabled: this.voiceEnabled,
+			voiceMaxTalkSeconds: this.voiceMaxTalkSeconds,
+			voiceSlowModeSeconds: this.voiceSlowModeSeconds,
+		}),
+		publish: msg => void this.publish(msg),
+		sendTo: (clientId, msg) => void this.command({ type: "send", clientId, msg }),
+		personKey: clientId => {
+			const user = this.getUser(clientId);
+			return user && (user.user_id ? `user:${user.user_id}` : `token:${user.token}`);
+		},
+		clientIds: () => this.realusers.map(user => user.id),
+	});
 
 	_currentSource: QueueItem | null = null;
 	queue: VideoQueue;
@@ -299,6 +332,9 @@ export class Room implements RoomState {
 				"restoreQueueBehavior",
 				"enableVoteSkip",
 				"votesToSkip",
+				"voiceEnabled",
+				"voiceMaxTalkSeconds",
+				"voiceSlowModeSeconds",
 			),
 		);
 		if (this.restoreQueueBehavior === BehaviorOption.Never) {
@@ -486,6 +522,36 @@ export class Room implements RoomState {
 	public set enableVoteSkip(value: boolean) {
 		this._enableVoteSkip = value;
 		this.markDirty("enableVoteSkip");
+	}
+
+	public get voiceEnabled(): boolean {
+		return this._voiceEnabled;
+	}
+
+	public set voiceEnabled(value: boolean) {
+		this._voiceEnabled = value;
+		this.markDirty("voiceEnabled");
+		this.voice.onRulesChanged();
+	}
+
+	public get voiceMaxTalkSeconds(): number {
+		return this._voiceMaxTalkSeconds;
+	}
+
+	public set voiceMaxTalkSeconds(value: number) {
+		this._voiceMaxTalkSeconds = value;
+		this.markDirty("voiceMaxTalkSeconds");
+		this.voice.onRulesChanged();
+	}
+
+	public get voiceSlowModeSeconds(): number {
+		return this._voiceSlowModeSeconds;
+	}
+
+	public set voiceSlowModeSeconds(value: number) {
+		this._voiceSlowModeSeconds = value;
+		this.markDirty("voiceSlowModeSeconds");
+		this.voice.onRulesChanged();
 	}
 
 	get users(): RoomUserInfo[] {
@@ -910,6 +976,9 @@ export class Room implements RoomState {
 			"grants",
 			"userRoles",
 			"owner",
+			"voiceEnabled",
+			"voiceMaxTalkSeconds",
+			"voiceSlowModeSeconds",
 		);
 		if (
 			!this.isTemporary &&
@@ -1080,6 +1149,8 @@ export class Room implements RoomState {
 			[RoomRequestType.ShuffleRequest, "manage-queue.order"],
 			[RoomRequestType.PlaybackSpeedRequest, "playback.speed"],
 			[RoomRequestType.KickRequest, "manage-users.kick"],
+			[RoomRequestType.VoiceRemoveRequest, "manage-users.voice-remove"],
+			[RoomRequestType.VoiceAllowRequest, "manage-users.voice-remove"],
 		]);
 		const permission = permissions.get(request.type);
 		if (permission) {
@@ -1116,6 +1187,11 @@ export class Room implements RoomState {
 			[RoomRequestType.PlaybackSpeedRequest]: "setPlaybackSpeed",
 			[RoomRequestType.RestoreQueueRequest]: "restoreQueue",
 			[RoomRequestType.KickRequest]: "kickUser",
+			[RoomRequestType.VoiceJoinRequest]: "voiceJoin",
+			[RoomRequestType.VoiceLeaveRequest]: "voiceLeave",
+			[RoomRequestType.VoiceTalkRequest]: "voiceTalk",
+			[RoomRequestType.VoiceRemoveRequest]: "voiceRemove",
+			[RoomRequestType.VoiceAllowRequest]: "voiceAllow",
 		};
 
 		const handler = handlers[request.type];
@@ -1355,6 +1431,7 @@ export class Room implements RoomState {
 		// HACK: force the client to receive the correct playback position
 		await this.publish({ action: "sync", playbackPosition: this.realPlaybackPosition });
 		await this.syncUser(this.getUserInfo(user.id));
+		this.voice.publishState();
 	}
 
 	public async leaveRoom(request: LeaveRequest, context: RoomRequestContext): Promise<void> {
@@ -1363,6 +1440,7 @@ export class Room implements RoomState {
 		}
 		const removed = this.getUserInfo(context.clientId);
 		this.lastReactionAt.delete(context.clientId);
+		this.voice.leave(context.clientId);
 		// We must publish the event before removing the user, otherwise publishing the event will fail because the user is gone.
 		await this.publishRoomEvent(request, context, { user: removed });
 
@@ -1430,6 +1508,56 @@ export class Room implements RoomState {
 			from: this.getUserInfo(context.clientId),
 			emoji: request.emoji,
 		});
+	}
+
+	public async voiceJoin(request: VoiceJoinRequest, context: RoomRequestContext): Promise<void> {
+		if (context.clientId !== undefined) {
+			this.voice.join(context.clientId, request.channel);
+		}
+	}
+
+	public async voiceLeave(
+		_request: VoiceLeaveRequest,
+		context: RoomRequestContext,
+	): Promise<void> {
+		if (context.clientId !== undefined) {
+			this.voice.leave(context.clientId);
+		}
+	}
+
+	public async voiceTalk(request: VoiceTalkRequest, context: RoomRequestContext): Promise<void> {
+		if (context.clientId === undefined) {
+			return;
+		}
+		if (request.talking) {
+			this.voice.startTalk(context.clientId);
+		} else {
+			this.voice.stopTalk(context.clientId);
+		}
+	}
+
+	public async voiceRemove(
+		request: VoiceRemoveRequest,
+		context: RoomRequestContext,
+	): Promise<void> {
+		const target = this.getUser(request.clientId);
+		if (!target) {
+			throw new ClientNotFoundInRoomException(this.name);
+		}
+		if (canKickUser(context.role, this.getRole(target))) {
+			this.voice.remove(request.clientId);
+		} else {
+			this.log.warn(
+				`${context.username} tried to remove someone from voice above their role`,
+			);
+		}
+	}
+
+	public async voiceAllow(
+		request: VoiceAllowRequest,
+		_context: RoomRequestContext,
+	): Promise<void> {
+		this.voice.allow(request.clientId);
 	}
 
 	public async undo(request: UndoRequest, context: RoomRequestContext): Promise<void> {
@@ -1599,6 +1727,9 @@ export class Room implements RoomState {
 			autoSkipSegmentCategories: "configure-room.other",
 			restoreQueueBehavior: "configure-room.other",
 			enableVoteSkip: "configure-room.other",
+			voiceEnabled: "configure-room.voice",
+			voiceMaxTalkSeconds: "configure-room.voice",
+			voiceSlowModeSeconds: "configure-room.voice",
 		};
 		const roleToPerms: Record<Exclude<Role, Role.Owner | Role.Administrator>, string> = {
 			[Role.UnregisteredUser]: "configure-room.set-permissions.for-all-unregistered-users",
@@ -1668,6 +1799,12 @@ export class Room implements RoomState {
 				);
 				autoSkipSegmentCategoriesChanged = true;
 			}
+		}
+
+		// Requests over the websocket do not pass through the REST API's schema, so check these here.
+		const voiceRules = VoiceRulesSchema.safeParse(request.settings);
+		if (!voiceRules.success) {
+			throw new BadApiArgumentException("voice rules", voiceRules.error.message);
 		}
 
 		// Now that we've checked permissions, it's now safe to apply the settings.

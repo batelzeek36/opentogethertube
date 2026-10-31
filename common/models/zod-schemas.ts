@@ -1,6 +1,12 @@
 import { ALL_VIDEO_SERVICES, ROOM_NAME_REGEX } from "ott-common/constants.js";
 import { BehaviorOption, Role } from "ott-common/models/types.js";
 import { Visibility, QueueMode } from "ott-common/models/types.js";
+import {
+	VOICE_MAX_TALK_SECONDS_MAX,
+	VOICE_MAX_TALK_SECONDS_MIN,
+	VOICE_SLOW_MODE_SECONDS_MAX,
+	VOICE_SLOW_MODE_SECONDS_MIN,
+} from "ott-common/models/voice.js";
 import { z } from "zod";
 
 // These strings are not allowed to be used as room names.
@@ -103,6 +109,23 @@ export const OttApiRequestAccountUpdateSchema = z
 
 const GrantSchema = z.tuple([z.nativeEnum(Role), z.number()]);
 
+/** The room owner's voice rules. Each is optional because a request can change any one of them. */
+export const VoiceRulesSchema = z.object({
+	voiceEnabled: z.boolean().optional(),
+	voiceMaxTalkSeconds: z
+		.number()
+		.int()
+		.min(VOICE_MAX_TALK_SECONDS_MIN)
+		.max(VOICE_MAX_TALK_SECONDS_MAX)
+		.optional(),
+	voiceSlowModeSeconds: z
+		.number()
+		.int()
+		.min(VOICE_SLOW_MODE_SECONDS_MIN)
+		.max(VOICE_SLOW_MODE_SECONDS_MAX)
+		.optional(),
+});
+
 export const RoomSettingsSchema = z
 	.object({
 		title: z
@@ -119,6 +142,7 @@ export const RoomSettingsSchema = z
 		autoSkipSegmentCategories: z.array(CategorySchema).optional(),
 		restoreQueueBehavior: z.nativeEnum(BehaviorOption).optional(),
 		enableVoteSkip: z.boolean().optional(),
+		...VoiceRulesSchema.shape,
 	})
 	.strict();
 

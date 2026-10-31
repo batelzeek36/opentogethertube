@@ -21,6 +21,8 @@ import _ from "lodash";
 import { VideoQueue } from "../../videoqueue.js";
 import { loadModels } from "../../models/index.js";
 import { buildClients } from "../../redisclient.js";
+import { BadApiArgumentException } from "../../exceptions.js";
+import { PermissionDeniedException } from "ott-common/exceptions.js";
 
 describe("Room", () => {
 	let getSessionInfoSpy: MockInstance<[AuthToken], Promise<SessionInfo>>;
@@ -436,6 +438,173 @@ describe("Room", () => {
 						context,
 					),
 				).rejects.toThrow();
+			});
+		});
+
+		describe("voice", () => {
+			const owner = { id: 1, username: "owner" } as never;
+			const memberContext = {
+				username: "test",
+				role: Role.UnregisteredUser,
+				clientId: "user",
+			};
+
+			afterEach(() => {
+				room.voice.dispose();
+			});
+
+			it("uses the default rules", () => {
+				expect(room.voiceEnabled).toEqual(true);
+				expect(room.voiceMaxTalkSeconds).toEqual(10);
+				expect(room.voiceSlowModeSeconds).toEqual(0);
+			});
+
+			it("routes join, talk and leave requests to the channels", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				await room.processRequest(
+					{ type: RoomRequestType.VoiceJoinRequest, channel: "main" },
+					memberContext,
+				);
+				await room.processRequest(
+					{ type: RoomRequestType.VoiceTalkRequest, talking: true },
+					memberContext,
+				);
+				expect(room.voice.state().channels[0]).toEqual({
+					id: "main",
+					members: ["user"],
+					speaker: "user",
+				});
+				await room.processRequest(
+					{ type: RoomRequestType.VoiceTalkRequest, talking: false },
+					memberContext,
+				);
+				expect(room.voice.state().channels[0].speaker).toBeNull();
+				await room.processRequest(
+					{ type: RoomRequestType.VoiceLeaveRequest },
+					memberContext,
+				);
+				expect(room.voice.state().channels[0].members).toEqual([]);
+				expect(publish).toHaveBeenCalledWith(expect.objectContaining({ action: "voice" }));
+			});
+
+			it("takes a person out of voice when they leave the room", async () => {
+				vi.spyOn(room, "publish").mockResolvedValue();
+				room.voice.join("user", "main");
+				await room.leaveRoom({ type: RoomRequestType.LeaveRequest }, memberContext);
+				expect(room.voice.state().channels[0].members).toEqual([]);
+			});
+
+			it.each([Role.UnregisteredUser, Role.RegisteredUser, Role.TrustedUser])(
+				"refuses rule changes from role %s, in a room with or without an owner",
+				async role => {
+					for (const hasOwner of [false, true]) {
+						room.owner = hasOwner ? owner : null;
+						await expect(
+							room.processRequest(
+								{
+									type: RoomRequestType.ApplySettingsRequest,
+									settings: { voiceMaxTalkSeconds: 30 },
+								},
+								{ ...memberContext, role },
+							),
+						).rejects.toThrow(PermissionDeniedException);
+					}
+					expect(room.voiceMaxTalkSeconds).toEqual(10);
+				},
+			);
+
+			it("cannot be unlocked by granting unregistered users the permission", () => {
+				room.grants.setRoleGrants(Role.UnregisteredUser, ["configure-room.voice"]);
+				expect(room.grants.granted(Role.UnregisteredUser, "configure-room.voice")).toEqual(
+					false,
+				);
+				room.grants.setRoleGrants(Role.RegisteredUser, ["manage-users.voice-remove"]);
+				expect(
+					room.grants.granted(Role.RegisteredUser, "manage-users.voice-remove"),
+				).toEqual(false);
+			});
+
+			it("takes rule changes from the owner", async () => {
+				await room.processRequest(
+					{
+						type: RoomRequestType.ApplySettingsRequest,
+						settings: {
+							voiceEnabled: false,
+							voiceMaxTalkSeconds: 30,
+							voiceSlowModeSeconds: 60,
+						},
+					},
+					{ ...memberContext, role: Role.Owner },
+				);
+				expect(room.voiceEnabled).toEqual(false);
+				expect(room.voiceMaxTalkSeconds).toEqual(30);
+				expect(room.voiceSlowModeSeconds).toEqual(60);
+			});
+
+			it.each([
+				{ voiceMaxTalkSeconds: 0 },
+				{ voiceMaxTalkSeconds: 121 },
+				{ voiceMaxTalkSeconds: 2.5 },
+				{ voiceMaxTalkSeconds: "10" as unknown as number },
+				{ voiceSlowModeSeconds: -1 },
+				{ voiceSlowModeSeconds: 301 },
+				{ voiceEnabled: "yes" as unknown as boolean },
+			])("refuses out of bounds rules from the owner over the socket: %j", async settings => {
+				await expect(
+					room.processRequest(
+						{ type: RoomRequestType.ApplySettingsRequest, settings },
+						{ ...memberContext, role: Role.Owner },
+					),
+				).rejects.toThrow(BadApiArgumentException);
+				expect(room.voiceMaxTalkSeconds).toEqual(10);
+				expect(room.voiceSlowModeSeconds).toEqual(0);
+				expect(room.voiceEnabled).toEqual(true);
+			});
+
+			it("only lets a moderator or above remove someone from voice", async () => {
+				vi.spyOn(room, "publish").mockResolvedValue();
+				room.realusers.push(new RoomUser("other", "b"));
+				room.voice.join("other", "main");
+				await expect(
+					room.processRequest(
+						{ type: RoomRequestType.VoiceRemoveRequest, clientId: "other" },
+						memberContext,
+					),
+				).rejects.toThrow(PermissionDeniedException);
+				expect(room.voice.state().channels[0].members).toEqual(["other"]);
+
+				await room.processRequest(
+					{ type: RoomRequestType.VoiceRemoveRequest, clientId: "other" },
+					{ ...memberContext, role: Role.Owner },
+				);
+				expect(room.voice.state().channels[0].members).toEqual([]);
+				expect(room.voice.state().removed).toEqual(["other"]);
+
+				await expect(
+					room.processRequest(
+						{ type: RoomRequestType.VoiceAllowRequest, clientId: "other" },
+						memberContext,
+					),
+				).rejects.toThrow(PermissionDeniedException);
+				await room.processRequest(
+					{ type: RoomRequestType.VoiceAllowRequest, clientId: "other" },
+					{ ...memberContext, role: Role.Owner },
+				);
+				expect(room.voice.state().removed).toEqual([]);
+			});
+
+			it("sends rules with room state, and not who is in voice", () => {
+				room.voice.join("user", "main");
+				expect(room.syncableState()).toMatchObject({
+					voiceEnabled: true,
+					voiceMaxTalkSeconds: 10,
+					voiceSlowModeSeconds: 0,
+				});
+				expect(room.syncableState()).not.toHaveProperty("voice");
+				expect(JSON.parse(room.serializeState())).toMatchObject({
+					voiceMaxTalkSeconds: 10,
+				});
+				expect(room.serializeState()).not.toContain("members");
 			});
 		});
 

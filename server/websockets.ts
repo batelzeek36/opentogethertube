@@ -4,7 +4,9 @@ import type { Server } from "node:http";
 import type { Socket } from "node:net";
 
 const log = getLogger("websockets");
-export const wss = new WebSocket.Server({ noServer: true });
+// Clients only ever send short messages and audio frames, so nobody gets to make the server buffer
+// anything big before it can look at it (the library's own limit is 100 MiB).
+export const wss = new WebSocket.Server({ noServer: true, maxPayload: 1024 * 1024 });
 
 /**
  * Set up the websocket server.

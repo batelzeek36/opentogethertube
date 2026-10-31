@@ -17,14 +17,22 @@ import { Counter } from "prom-client";
 
 const log = getLogger("client");
 
-export type ClientEvents = "auth" | "message" | "disconnect";
+export type ClientEvents = "auth" | "message" | "binary" | "disconnect";
 export type ClientEventHandlers<E> = E extends "auth"
 	? (client: Client, token: AuthToken, session: SessionInfo) => void
 	: E extends "message"
 		? (client: Client, msg: ClientMessage) => void
-		: E extends "disconnect"
-			? (client: Client) => void
-			: never;
+		: E extends "binary"
+			? (client: Client, data: Buffer) => void
+			: E extends "disconnect"
+				? (client: Client) => void
+				: never;
+
+/**
+ * Stop sending audio to a socket with this much already waiting to go out, roughly a second of
+ * audio. Its owner has fallen behind, and late audio is worse than a gap.
+ */
+const MAX_BUFFERED_BYTES_FOR_BINARY = 32 * 1024;
 
 export enum ClientJoinStatus {
 	WaitingForAuth,
@@ -136,7 +144,21 @@ export class DirectClient extends Client {
 	}
 
 	onData(data: WebSocket.Data) {
-		const msg: ClientMessage = JSON.parse(data.toString());
+		// Audio frames take their own path: they must never reach the JSON parser or any logging.
+		// Text arrives as a string and binary as a Buffer, which is how this version of ws tells them apart.
+		if (typeof data !== "string") {
+			if (Buffer.isBuffer(data)) {
+				this.emit("binary", this, data);
+			}
+			return;
+		}
+		let msg: ClientMessage;
+		try {
+			msg = JSON.parse(data);
+		} catch {
+			log.warn(`Dropping a message that is not valid JSON from client ${this.id}`);
+			return;
+		}
 		if (msg.action === "auth") {
 			this.auth(msg.token);
 			return;
@@ -158,6 +180,12 @@ export class DirectClient extends Client {
 
 	sendRaw(msg: string) {
 		this.socket.send(msg);
+	}
+
+	sendBinary(data: Buffer) {
+		if (this.socket.bufferedAmount <= MAX_BUFFERED_BYTES_FOR_BINARY) {
+			this.socket.send(data, { binary: true });
+		}
 	}
 
 	kick(code: number) {

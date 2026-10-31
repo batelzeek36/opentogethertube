@@ -14,6 +14,7 @@ import type {
 } from "./types.js";
 import type { QueueItem, QueueItemExtras, VideoId, VideoAdd } from "./video.js";
 import type { Reaction } from "./reactions.js";
+import type { VoiceChannelId, VoiceYouEvent } from "./voice.js";
 
 export type ServerMessage =
 	| ServerMessageSync
@@ -24,7 +25,9 @@ export type ServerMessage =
 	| ServerMessageEventCustom
 	| ServerMessageAnnouncement
 	| ServerMessageUser
-	| ServerMessageYou;
+	| ServerMessageYou
+	| ServerMessageVoice
+	| ServerMessageVoiceYou;
 
 export type ServerMessageActionType = ServerMessage["action"];
 
@@ -54,6 +57,9 @@ export interface ServerMessageSync extends ServerMessageBase {
 	autoSkipSegmentCategories?: Category[];
 	videoSegments?: Segment[];
 	restoreQueueBehavior?: BehaviorOption;
+	voiceEnabled?: boolean;
+	voiceMaxTalkSeconds?: number;
+	voiceSlowModeSeconds?: number;
 }
 
 /**
@@ -106,6 +112,20 @@ export interface ServerMessageYou extends ServerMessageBase {
 		id: ClientId;
 	};
 }
+
+/**
+ * Who is in each voice channel and who is talking, sent to the whole room whenever it changes.
+ * Carries no audio: audio only ever goes to the members of a channel, as binary frames.
+ */
+export interface ServerMessageVoice extends ServerMessageBase {
+	action: "voice";
+	channels: { id: VoiceChannelId; members: ClientId[]; speaker: ClientId | null }[];
+	/** Connected clients the mod has removed from voice. */
+	removed: ClientId[];
+}
+
+/** Something about voice that only concerns the client it is sent to. */
+export type ServerMessageVoiceYou = ServerMessageBase & { action: "voice-you" } & VoiceYouEvent;
 
 export type UserUpdate =
 	| {
@@ -214,7 +234,12 @@ export type RoomRequest =
 	| RestoreQueueRequest
 	| KickRequest
 	| UpdateQueueItemRequest
-	| ReactionRequest;
+	| ReactionRequest
+	| VoiceJoinRequest
+	| VoiceLeaveRequest
+	| VoiceTalkRequest
+	| VoiceRemoveRequest
+	| VoiceAllowRequest;
 
 export enum RoomRequestType {
 	JoinRequest,
@@ -238,6 +263,11 @@ export enum RoomRequestType {
 	KickRequest,
 	UpdateQueueItemRequest,
 	ReactionRequest,
+	VoiceJoinRequest,
+	VoiceLeaveRequest,
+	VoiceTalkRequest,
+	VoiceRemoveRequest,
+	VoiceAllowRequest,
 }
 
 export interface RoomRequestBase {
@@ -319,6 +349,33 @@ export interface ChatRequest extends RoomRequestBase {
 export interface ReactionRequest extends RoomRequestBase {
 	type: RoomRequestType.ReactionRequest;
 	emoji: Reaction;
+}
+
+export interface VoiceJoinRequest extends RoomRequestBase {
+	type: RoomRequestType.VoiceJoinRequest;
+	channel: VoiceChannelId;
+}
+
+export interface VoiceLeaveRequest extends RoomRequestBase {
+	type: RoomRequestType.VoiceLeaveRequest;
+}
+
+/** Press (true) or let go of (false) the talk button. */
+export interface VoiceTalkRequest extends RoomRequestBase {
+	type: RoomRequestType.VoiceTalkRequest;
+	talking: boolean;
+}
+
+/** Take someone out of voice and keep them out until a mod allows them back. */
+export interface VoiceRemoveRequest extends RoomRequestBase {
+	type: RoomRequestType.VoiceRemoveRequest;
+	clientId: ClientId;
+}
+
+/** Let someone who was removed from voice join again. */
+export interface VoiceAllowRequest extends RoomRequestBase {
+	type: RoomRequestType.VoiceAllowRequest;
+	clientId: ClientId;
 }
 
 export interface UndoRequest extends RoomRequestBase {

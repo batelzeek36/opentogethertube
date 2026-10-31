@@ -5,6 +5,7 @@ import { ALL_SKIP_CATEGORIES, ROOM_NAME_REGEX } from "ott-common/constants.js";
 import type { OldRoleGrants, GrantMask } from "ott-common/permissions.js";
 import type { QueueItem } from "ott-common/models/video.js";
 import type { Category } from "sponsorblock-api";
+import { VOICE_RULE_DEFAULTS } from "ott-common/models/voice.js";
 
 export interface RoomAttributes {
 	id: number;
@@ -22,6 +23,9 @@ export interface RoomAttributes {
 	prevQueue: Array<QueueItem> | null;
 	restoreQueueBehavior: BehaviorOption;
 	enableVoteSkip: boolean;
+	voiceEnabled: boolean;
+	voiceMaxTalkSeconds: number;
+	voiceSlowModeSeconds: number;
 }
 
 type RoomCreationAttributes = Optional<RoomAttributes, "id">;
@@ -45,6 +49,9 @@ export class Room extends Model<RoomAttributes, RoomCreationAttributes> implemen
 	declare prevQueue: Array<QueueItem> | null;
 	declare restoreQueueBehavior: BehaviorOption;
 	declare enableVoteSkip: boolean;
+	declare voiceEnabled: boolean;
+	declare voiceMaxTalkSeconds: number;
+	declare voiceSlowModeSeconds: number;
 }
 
 export const createModel = (sequelize: Sequelize) => {
@@ -119,6 +126,21 @@ export const createModel = (sequelize: Sequelize) => {
 				type: DataTypes.BOOLEAN,
 				allowNull: false,
 				defaultValue: false,
+			},
+			voiceEnabled: {
+				type: DataTypes.BOOLEAN,
+				allowNull: false,
+				defaultValue: VOICE_RULE_DEFAULTS.voiceEnabled,
+			},
+			voiceMaxTalkSeconds: {
+				type: DataTypes.INTEGER,
+				allowNull: false,
+				defaultValue: VOICE_RULE_DEFAULTS.voiceMaxTalkSeconds,
+			},
+			voiceSlowModeSeconds: {
+				type: DataTypes.INTEGER,
+				allowNull: false,
+				defaultValue: VOICE_RULE_DEFAULTS.voiceSlowModeSeconds,
 			},
 		},
 		{

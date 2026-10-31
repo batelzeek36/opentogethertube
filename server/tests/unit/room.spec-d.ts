@@ -26,6 +26,9 @@ describe("room state types", () => {
 			| "prevQueue"
 			| "restoreQueueBehavior"
 			| "enableVoteSkip"
+			| "voiceEnabled"
+			| "voiceMaxTalkSeconds"
+			| "voiceSlowModeSeconds"
 			| "votesToSkip";
 		type ExMsg = Pick<ServerMessageSync, B>;
 		type ExRoom = Pick<Partial<ConvertToJsonSafe<RoomStateSyncable>>, B>;
