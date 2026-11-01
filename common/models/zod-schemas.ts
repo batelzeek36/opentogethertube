@@ -61,7 +61,7 @@ const QueueItemExtrasSchema = z.object({
 	subtitleUrl: z.string().url().optional(),
 });
 
-const VideoAddSchema = VideoIdSchema.extend(QueueItemExtrasSchema.shape);
+export const VideoAddSchema = VideoIdSchema.extend(QueueItemExtrasSchema.shape);
 
 export const OttApiRequestUndoSchema = z.object({
 	eventId: z.string(),

@@ -167,16 +167,44 @@ describe("Room", () => {
 				expect(room.playbackPosition).toEqual(15);
 			});
 
-			it.each([undefined, null])("should not seek if value is %s", async v => {
+			it.each([undefined, null, "abc", {}, [], true, Infinity, -Infinity, Number.NaN])(
+				"should not seek if value is %s",
+				async v => {
+					room.playbackPosition = 10;
+					await room.processUnauthorizedRequest(
+						{
+							type: RoomRequestType.SeekRequest,
+							value: v as unknown as number,
+						},
+						{ token: user.token },
+					);
+					expect(room.playbackPosition).toEqual(10);
+				},
+			);
+
+			it("should seek to the start for a position before it", async () => {
 				room.playbackPosition = 10;
 				await room.processUnauthorizedRequest(
-					{
-						type: RoomRequestType.SeekRequest,
-						value: v as unknown as number,
-					},
+					{ type: RoomRequestType.SeekRequest, value: -5 },
 					{ token: user.token },
 				);
-				expect(room.playbackPosition).toEqual(10);
+				expect(room.playbackPosition).toEqual(0);
+			});
+
+			it("should seek to the end for a position after it, so seeking can't skip", async () => {
+				room.currentSource = {
+					service: "direct",
+					id: "video",
+					title: "test",
+					description: "test",
+					thumbnail: "test",
+					length: 100,
+				};
+				await room.processUnauthorizedRequest(
+					{ type: RoomRequestType.SeekRequest, value: 1e308 },
+					{ token: user.token },
+				);
+				expect(room.playbackPosition).toEqual(100);
 			});
 		});
 
@@ -818,7 +846,49 @@ describe("Room", () => {
 			});
 		});
 
+		describe("PromoteRequest", () => {
+			it("can't be used to strip someone's role by asking to make them owner", async () => {
+				room.grants.setRoleGrants(Role.UnregisteredUser, 0);
+				const moderator = { id: "mod", username: "mod", user_id: 5 };
+				const addedUsers = room.realusers;
+				addedUsers.push(moderator as never);
+				room.userRoles.get(Role.Moderator)?.add(5);
+				await expect(
+					room.processRequest(
+						{
+							type: RoomRequestType.PromoteRequest,
+							targetClientId: "mod",
+							role: Role.Owner,
+						},
+						{ username: "viewer", role: Role.UnregisteredUser, clientId: "viewer" },
+					),
+				).rejects.toThrow();
+				expect(room.userRoles.get(Role.Moderator)?.has(5)).toEqual(true);
+			});
+		});
+
 		describe("RestoreQueueRequest", () => {
+			it("takes permission to add to the queue", async () => {
+				room.prevQueue = [
+					{
+						service: "direct",
+						id: "video",
+						title: "test",
+						description: "test",
+						thumbnail: "test",
+						length: 10,
+					},
+				];
+				room.grants.setRoleGrants(Role.UnregisteredUser, 0);
+				await expect(
+					room.processRequest(
+						{ type: RoomRequestType.RestoreQueueRequest, discard: true },
+						{ username: "viewer", role: Role.UnregisteredUser, clientId: "viewer" },
+					),
+				).rejects.toThrow();
+				expect(room.prevQueue).not.toBeNull();
+			});
+
 			it("should restore the queue", async () => {
 				const prevQueue: VideoId[] = [
 					{ service: "direct", id: "video1" },

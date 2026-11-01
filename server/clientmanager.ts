@@ -27,7 +27,7 @@ import tokens, { type SessionInfo } from "./auth/tokens.js";
 import { Gauge } from "prom-client";
 import { replacer } from "ott-common/serialize.js";
 import { type Client, ClientJoinStatus, DirectClient, BalancerClient } from "./client.js";
-import { isClientSendableRequest, isPlayerStatus } from "./client-requests.js";
+import { parseClientRequest, isPlayerStatus } from "./client-requests.js";
 import {
 	type BalancerConnection,
 	type MsgB2M,
@@ -237,19 +237,20 @@ async function onClientMessage(client: Client, msg: ClientMessage) {
 				info: { id: client.id, device: msg.device },
 			});
 		} else if (msg.action === "req") {
-			if (!isClientSendableRequest(msg.request)) {
+			const request = parseClientRequest(msg.request);
+			if (!request) {
 				log.warn(`Refused a room request a client may not send, from client ${client.id}`);
 				return;
 			}
 			// Audio is binary, which the balancer protocol cannot carry.
 			if (
 				client instanceof BalancerClient &&
-				msg.request.type === RoomRequestType.VoiceJoinRequest
+				request.type === RoomRequestType.VoiceJoinRequest
 			) {
 				client.send({ action: "voice-you", event: "join-refused", reason: "unsupported" });
 				return;
 			}
-			await makeRoomRequest(client, msg.request);
+			await makeRoomRequest(client, request);
 		} else if (msg.action === "notify") {
 			if (msg.message === "usernameChanged") {
 				if (!client.token) {

@@ -1186,6 +1186,7 @@ export class Room implements RoomState {
 			[RoomRequestType.ReactionRequest, "chat"],
 			[RoomRequestType.ChatReactionRequest, "chat"],
 			[RoomRequestType.PlayNowRequest, "manage-queue.play-now"],
+			[RoomRequestType.RestoreQueueRequest, "manage-queue.add"],
 			[RoomRequestType.ShuffleRequest, "manage-queue.order"],
 			[RoomRequestType.PlaybackSpeedRequest, "playback.speed"],
 			[RoomRequestType.KickRequest, "manage-users.kick"],
@@ -1345,13 +1346,15 @@ export class Room implements RoomState {
 	 * Seek to the specified position in the video.
 	 */
 	public async seek(request: SeekRequest, context: RoomRequestContext): Promise<void> {
-		if (request.value === undefined || request.value === null) {
-			this.log.error("seek value was undefined or null");
+		if (typeof request.value !== "number" || !Number.isFinite(request.value)) {
+			this.log.error("seek value was not a number");
 			return;
 		}
+		// Past the end would be a skip, which takes a permission that seeking doesn't.
+		const value = _.clamp(request.value, 0, this.currentSource?.length || Infinity);
 		const prev = this.realPlaybackPosition;
-		this.seekRaw(request.value);
-		await this.publishRoomEvent(request, context, { prevPosition: prev });
+		this.seekRaw(value);
+		await this.publishRoomEvent({ ...request, value }, context, { prevPosition: prev });
 
 		const segment = this.getSegmentForTime(this.playbackPosition);
 		if (segment !== undefined) {
@@ -1663,7 +1666,6 @@ export class Room implements RoomState {
 				break;
 			case Role.RegisteredUser:
 			case Role.UnregisteredUser:
-			case Role.Owner:
 				break;
 			default:
 				throw new ImpossiblePromotionException();

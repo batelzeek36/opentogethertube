@@ -68,6 +68,7 @@
 					:placeholder="$t('chat.type-here')"
 					@keydown="onInputKeyDown"
 					v-model="inputValue"
+					:maxlength="CHAT_MESSAGE_LENGTH_MAX"
 					autocomplete="off"
 					ref="chatInput"
 					@blur="deactivateOnBlur && setActivated(false)"
@@ -106,6 +107,7 @@ import { computed, onUpdated, ref, type Ref, nextTick, onMounted, onUnmounted, w
 import { useConnection } from "@/plugins/connection";
 import { useStore } from "@/store";
 import { useRoomApi } from "@/util/roomapi";
+import { CHAT_MESSAGE_LENGTH_MAX } from "ott-common/constants";
 import type { ServerMessageChat, ServerMessageChatReactions } from "ott-common/models/messages";
 import type { ChatMessageId, Reaction } from "ott-common/models/reactions";
 import type { ChatMessage } from "ott-common/models/types";
