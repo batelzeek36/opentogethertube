@@ -90,7 +90,8 @@ export async function authTokenMiddleware(
 			req.user = await usermanager.getUser({ id: req.ottsession.user_id });
 		} catch (err) {
 			log.warn(`Error getting user in auth middleware, logging out: ${err}`);
-			await tokens.setSessionInfo(req.token, createSession());
+			req.ottsession = createSession();
+			await tokens.setSessionInfo(req.token, req.ottsession);
 		}
 	}
 	next();

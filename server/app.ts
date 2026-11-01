@@ -11,7 +11,7 @@ import { loadModels, sequelize } from "./models/index.js";
 import { buildApiRouter } from "./api.js";
 import { buildClients, redisClient, registerRedisMetrics } from "./redisclient.js";
 import usermanager from "./usermanager.js";
-import tokens from "./auth/tokens.js";
+import tokens, { type SessionInfo } from "./auth/tokens.js";
 import websockets from "./websockets.js";
 import clientmanager from "./clientmanager.js";
 import roommanager from "./roommanager.js";
@@ -23,11 +23,14 @@ import session, { type SessionOptions } from "express-session";
 import RedisStore from "connect-redis";
 import { setupPostgresMetricsCollection } from "./storage.metrics.js";
 import cookieparser from "cookie-parser";
+import { lastResortErrorHandler, sendRejectionsToErrorHandlers } from "./express-safety.js";
 
 const app = express();
 
 export async function main() {
 	const log = getLogger("app");
+
+	sendRejectionsToErrorHandlers();
 
 	setLogger(getLogger("config"));
 	loadConfigFile();
@@ -163,14 +166,16 @@ export async function main() {
 	);
 	passport.use(
 		new BearerStrategy(async (token, done) => {
-			if (!(await tokens.validate(token))) {
-				return done(null, false);
+			let ottsession: SessionInfo | undefined;
+			try {
+				if (await tokens.validate(token)) {
+					ottsession = await tokens.getSessionInfo(token);
+				}
+			} catch (err) {
+				done(err);
+				return;
 			}
-			const ottsession = await tokens.getSessionInfo(token);
-			if (ottsession.isLoggedIn) {
-				return done(null, ottsession);
-			}
-			return done(null, false);
+			done(null, ottsession?.isLoggedIn ? ottsession : false);
 		}),
 	);
 	passport.serializeUser(usermanager.serializeUser);
@@ -223,6 +228,8 @@ export async function main() {
 			);
 		});
 	}
+
+	app.use(lastResortErrorHandler);
 
 	initExtractor();
 

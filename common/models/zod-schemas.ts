@@ -87,6 +87,12 @@ export const OttApiRequestRemoveFromQueueSchema = z.object({
 
 export const OttApiRequestUpdateQueueItemSchema = VideoIdSchema.extend(QueueItemExtrasSchema.shape);
 
+export const OttApiRequestRegisterSchema = z.object({
+	email: z.string().nullish(),
+	username: z.string(),
+	password: z.string(),
+});
+
 export const OttApiRequestAccountRecoveryStartSchema = z.union([
 	z.object({
 		email: z.string().email().min(3),
