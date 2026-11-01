@@ -1,3 +1,4 @@
+import { createServer, type Server } from "node:http";
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import request from "supertest";
 import { RateLimiterRes } from "rate-limiter-flexible";
@@ -89,6 +90,7 @@ const QUERIES = ["", "input[a]=b", "input=&adapter[a]=b", "permanent=true", "red
 
 describe("hostile REST requests", () => {
 	let app: any;
+	let server: Server;
 	let routes: Route[];
 	let viewerToken: string;
 	let loggedInToken: string;
@@ -101,19 +103,23 @@ describe("hostile REST requests", () => {
 		await buildClients();
 		app = (await main()).app;
 		await new Promise(resolve => setTimeout(resolve, 100));
+		// One listener for the whole file: given the app, supertest opens one per request, and
+		// thousands of those run out of free ports and fail with EADDRINUSE.
+		server = createServer(app);
+		await new Promise<void>(resolve => server.listen(0, resolve));
 		process.on("unhandledRejection", onUnhandled);
 
 		routes = listRoutes(app._router.stack);
 
-		viewerToken = (await request(app).get("/api/auth/grant")).body.token;
-		loggedInToken = (await request(app).get("/api/auth/grant")).body.token;
-		await request(app)
+		viewerToken = (await request(server).get("/api/auth/grant")).body.token;
+		loggedInToken = (await request(server).get("/api/auth/grant")).body.token;
+		await request(server)
 			.post("/api/user/register")
 			.set("Authorization", `Bearer ${loggedInToken}`)
 			.send({ username, password: "test1234" })
 			.expect(201);
 		user = await usermanager.getUser({ user: username });
-		await request(app)
+		await request(server)
 			.post("/api/room/create")
 			.set("Authorization", `Bearer ${viewerToken}`)
 			.send({ name: "hostile", isTemporary: true })
@@ -123,6 +129,7 @@ describe("hostile REST requests", () => {
 	afterAll(async () => {
 		process.off("unhandledRejection", onUnhandled);
 		await user.destroy();
+		await new Promise(resolve => server.close(resolve));
 	});
 
 	afterEach(() => {
@@ -151,7 +158,7 @@ describe("hostile REST requests", () => {
 	];
 
 	async function hit(route: Route, path: string, token: string | undefined, body: unknown) {
-		let test = (request(app) as any)[route.method](path);
+		let test = (request(server) as any)[route.method](path);
 		if (token) {
 			test = test.set("Authorization", `Bearer ${token}`);
 		}
@@ -275,19 +282,19 @@ describe("hostile REST requests", () => {
 
 	it("survives logging in and out with redis failing", async () => {
 		const tokens = (await import("../../../auth/tokens.js")).default;
-		const token = (await request(app).get("/api/auth/grant")).body.token;
+		const token = (await request(server).get("/api/auth/grant")).body.token;
 		const second = await usermanager.registerUser({
 			email: null,
 			username: `${username} second`,
 			password: "test1234",
 		});
-		await request(app)
+		await request(server)
 			.post("/api/user/login")
 			.set("Authorization", `Bearer ${token}`)
 			.send({ user: second.username, password: "test1234" })
 			.expect(200);
 		vi.spyOn(tokens, "setSessionInfo").mockRejectedValue(new Error("redis is down"));
-		await request(app)
+		await request(server)
 			.post("/api/user/logout")
 			.set("Authorization", `Bearer ${token}`)
 			.expect(500);
@@ -297,6 +304,6 @@ describe("hostile REST requests", () => {
 	});
 
 	it("is still up afterwards", async () => {
-		await request(app).get("/api/status").expect(200);
+		await request(server).get("/api/status").expect(200);
 	});
 });
