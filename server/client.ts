@@ -55,6 +55,8 @@ export abstract class Client {
 	joinStatus: ClientJoinStatus = ClientJoinStatus.WaitingForAuth;
 
 	private bus: EventEmitter;
+	/** Set before the first await in auth, so two messages sent together can't both get through. */
+	private authStarted = false;
 
 	constructor(room: string) {
 		this.id = uuidv4();
@@ -82,7 +84,16 @@ export abstract class Client {
 		await setSessionInfo(this.token, this.session);
 	}
 
+	/**
+	 * Say who this client is. This happens once per connection. Another would join the room again,
+	 * which duplicates the user and everything sent to them, and would change who they are.
+	 */
 	public async auth(token: AuthToken): Promise<void> {
+		if (this.authStarted) {
+			log.warn(`Client ${this.id} tried to authenticate again, ignoring`);
+			return;
+		}
+		this.authStarted = true;
 		if (!token) {
 			log.warn("Client sent empty auth token, kicking");
 			this.kick(OttWebsocketError.MISSING_TOKEN);
