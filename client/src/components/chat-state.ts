@@ -20,3 +20,6 @@ export const chatMessageRecent: Ref<ChatMessage[]> = ref([]);
 
 /** True while the chat is open for typing, so the reaction bar can give up its space on narrow screens. */
 export const chatOpen: Ref<boolean> = ref(false);
+
+/** Messages from other people that arrived while the chat was closed. */
+export const chatUnread: Ref<number> = ref(0);

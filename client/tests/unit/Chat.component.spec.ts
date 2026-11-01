@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	RoomRequestType,
 	type ClientMessageRoomRequest,
@@ -6,6 +6,7 @@ import {
 } from "ott-common/models/messages";
 import { PlayerStatus, Role } from "ott-common/models/types";
 import Chat from "@/components/Chat.vue";
+import { chatMessageRecent, chatUnread } from "@/components/chat-state";
 import { mountComponent } from "./component-test-utils";
 
 describe("Chat component", () => {
@@ -67,6 +68,52 @@ describe("Chat component", () => {
 			scrollState(messages.element, 500, 100, 395);
 			await messages.trigger("scroll");
 			expect(wrapper.find(".to-bottom").exists()).toBe(false);
+		});
+	});
+
+	describe("unread count", () => {
+		const message = (id: string): ServerMessage => ({
+			action: "chat",
+			from: {
+				id,
+				name: id,
+				isLoggedIn: false,
+				status: PlayerStatus.ready,
+				role: Role.UnregisteredUser,
+			},
+			text: "hi",
+		});
+
+		afterEach(() => {
+			chatUnread.value = 0;
+			chatMessageRecent.value = [];
+		});
+
+		it("counts messages from others while closed and clears when opened", async () => {
+			const { wrapper, connection } = mountComponent(Chat);
+			connection.mockReceive(message("other"));
+			connection.mockReceive(message("other"));
+			await wrapper.vm.$nextTick();
+			expect(wrapper.get('[data-cy="chat-unread"]').text()).toBe("2");
+			expect(wrapper.get('[data-cy="chat-activate"]').classes()).toContain("chat-has-unread");
+			await wrapper.get('[data-cy="chat-activate"]').trigger("click");
+			await wrapper.get('[data-cy="chat-deactivate"]').trigger("click");
+			expect(wrapper.find('[data-cy="chat-unread"]').exists()).toBe(false);
+		});
+
+		it("does not count a message while the chat is open", async () => {
+			const { wrapper, connection } = mountComponent(Chat);
+			await wrapper.get('[data-cy="chat-activate"]').trigger("click");
+			connection.mockReceive(message("other"));
+			await wrapper.vm.$nextTick();
+			expect(chatUnread.value).toBe(0);
+		});
+
+		it("does not count the person's own message", async () => {
+			const { wrapper, connection, store } = mountComponent(Chat);
+			connection.mockReceive(message(store.state.users.you.id));
+			await wrapper.vm.$nextTick();
+			expect(chatUnread.value).toBe(0);
 		});
 	});
 

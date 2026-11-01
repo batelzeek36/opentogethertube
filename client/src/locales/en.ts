@@ -199,6 +199,7 @@ export default {
 		"mute-volume": "Mute",
 		"close-chat": "Close chat",
 		"open-chat": "Open chat",
+		"open-chat-unread": "Open chat, {count} new messages",
 		react: "React with {emoji}",
 		reactions: "Reactions",
 		"scroll-chat-bottom": "Scroll to bottom",

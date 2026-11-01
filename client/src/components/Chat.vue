@@ -66,9 +66,17 @@
 				size="icon"
 				@click="setActivated(true, true)"
 				data-cy="chat-activate"
-				:aria-label="$t('room.open-chat')"
+				:class="{ 'chat-has-unread': chatUnread > 0 }"
+				:aria-label="
+					chatUnread > 0
+						? $t('room.open-chat-unread', { count: chatUnread })
+						: $t('room.open-chat')
+				"
 			>
 				<Icon :icon="mdiCommentOutline" class="size-5" />
+				<span v-if="chatUnread > 0" class="chat-unread" data-cy="chat-unread">
+					{{ chatUnread > 99 ? "99+" : chatUnread }}
+				</span>
 			</Button>
 		</div>
 	</div>
@@ -81,11 +89,12 @@ import { Input } from "@/components/ui/input";
 import { mdiChevronDown, mdiChevronDoubleDown, mdiCommentOutline } from "@mdi/js";
 import { computed, onUpdated, ref, type Ref, nextTick, onMounted, onUnmounted } from "vue";
 import { useConnection } from "@/plugins/connection";
+import { useStore } from "@/store";
 import { useRoomApi } from "@/util/roomapi";
 import type { ServerMessageChat } from "ott-common/models/messages";
 import { useRoomKeyboardShortcuts } from "@/util/keyboard-shortcuts";
 import ChatMsg from "./ChatMsg.vue";
-import { chatMessagePast, chatMessageRecent, chatOpen } from "./chat-state";
+import { chatMessagePast, chatMessageRecent, chatOpen, chatUnread } from "./chat-state";
 
 const MSG_SHOW_TIMEOUT = 20000;
 const KEYBOARD_MIN_HEIGHT = 100;
@@ -100,6 +109,7 @@ const props = defineProps({
 });
 
 const connection = useConnection();
+const store = useStore();
 const roomapi = useRoomApi(connection);
 
 const inputValue = ref("");
@@ -179,6 +189,9 @@ async function setActivated(value: boolean, manual = false): Promise<void> {
 	}
 	activated.value = value;
 	chatOpen.value = value;
+	if (value) {
+		chatUnread.value = 0;
+	}
 	if (!value) {
 		restoreScroll();
 		scrollBeforeChat = null;
@@ -199,6 +212,9 @@ async function setActivated(value: boolean, manual = false): Promise<void> {
 
 function onChatReceived(msg: ServerMessageChat): void {
 	chatMessageRecent.value.push(msg);
+	if (!isActive.value && msg.from.id !== store.state.users.you.id) {
+		chatUnread.value += 1;
+	}
 	setTimeout(expireChatMessage, MSG_SHOW_TIMEOUT);
 	nextTick(enforceStickToBottom);
 }
@@ -332,6 +348,42 @@ onUpdated(enforceStickToBottom);
 	pointer-events: none;
 
 	align-items: baseline;
+}
+
+.chat-has-unread {
+	position: relative;
+	overflow: visible;
+	color: var(--primary);
+	filter: drop-shadow(0 0 6px var(--primary));
+	animation: chat-unread-glow 1.6s ease-in-out infinite;
+}
+
+.chat-unread {
+	position: absolute;
+	top: -2px;
+	right: -4px;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 4px;
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 18px;
+	text-align: center;
+	color: var(--primary-foreground);
+	background: var(--primary);
+}
+
+@keyframes chat-unread-glow {
+	50% {
+		filter: drop-shadow(0 0 14px var(--primary));
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.chat-has-unread {
+		animation: none;
+	}
 }
 
 .manual-activate {
