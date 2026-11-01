@@ -44,6 +44,25 @@ const log = getLogger("clientmanager");
 
 const connections: Client[] = [];
 const roomJoins: Map<string, Client[]> = new Map();
+
+/**
+ * Nothing awaits an event listener, so a rejection from an async one is unhandled, and Node exits
+ * on those: one bad message would end the movie for every room on this server. Every async listener
+ * that something outside this process can trigger goes through here.
+ */
+function logFailures<A extends unknown[]>(
+	what: string,
+	listener: (...args: A) => Promise<void>,
+): (...args: A) => Promise<void> {
+	return async (...args) => {
+		try {
+			await listener(...args);
+		} catch (err) {
+			log.error(`Failed to handle ${what}: ${err}`);
+		}
+	};
+}
+
 export async function setup(): Promise<void> {
 	log.debug("setting up client manager...");
 	const server = wss;
@@ -55,11 +74,11 @@ export async function setup(): Promise<void> {
 		}
 		await onDirectConnect(ws, req);
 	});
-	roommanager.on("publish", onRoomPublish);
+	roommanager.on("publish", logFailures("a room publish", onRoomPublish));
 	roommanager.on("unload", onRoomUnload);
-	roommanager.on("command", handleCommand);
+	roommanager.on("command", logFailures("a room command", handleCommand));
 
-	usermanager.on("userModified", onUserModified);
+	usermanager.on("userModified", logFailures("a modified user", onUserModified));
 
 	setupBalancerManager();
 	initBalancerConnections();
@@ -123,14 +142,21 @@ export function parseWebsocketConnectionUrl(req: express.Request): string {
 export function addClient(client: Client) {
 	log.info(`New ${client.clientType} client (${client.id}) joining room ${client.room}`);
 	connections.push(client);
-	client.on("auth", onClientAuth);
-	client.on("message", onClientMessage);
+	client.on("auth", logFailures("a client joining", onClientAuth));
+	client.on("message", logFailures("a client message", onClientMessage));
 	client.on("binary", onClientBinary);
-	client.on("disconnect", onClientDisconnect);
+	client.on("disconnect", logFailures("a client leaving", onClientDisconnect));
 }
 
 async function onClientAuth(client: Client, token: AuthToken, session: SessionInfo) {
-	const result = await roommanager.getRoom(client.room);
+	let result: Awaited<ReturnType<typeof roommanager.getRoom>>;
+	try {
+		result = await roommanager.getRoom(client.room);
+	} catch (e) {
+		log.error(`Failed to load room ${client.room} for client ${client.id}: ${e}`);
+		client.kick(OttWebsocketError.UNKNOWN);
+		return;
+	}
 	if (!result.ok) {
 		client.kick(OttWebsocketError.ROOM_NOT_FOUND);
 		return;
@@ -222,7 +248,10 @@ async function onClientMessage(client: Client, msg: ClientMessage) {
 			await makeRoomRequest(client, msg.request);
 		} else if (msg.action === "notify") {
 			if (msg.message === "usernameChanged") {
-				onUserModified(client.token!);
+				if (!client.token) {
+					throw new MissingToken();
+				}
+				await onUserModified(client.token);
 			} else {
 				log.warn(`Unknown notify message: ${msg.message}`);
 			}
@@ -304,8 +333,13 @@ async function onClientDisconnect(client: Client) {
  * through the room's publish, Redis or the logs.
  */
 function onClientBinary(client: Client, frame: Buffer) {
-	const room = roommanager.getLoadedRoom(client.room);
-	const recipients = room?.voice.acceptFrame(client.id, frame);
+	let recipients: ClientId[] | null | undefined;
+	try {
+		recipients = roommanager.getLoadedRoom(client.room)?.voice.acceptFrame(client.id, frame);
+	} catch (e) {
+		log.error(`Failed to route audio from client ${client.id}: ${e}`);
+		return;
+	}
 	if (!recipients || recipients.length === 0) {
 		return;
 	}
@@ -384,11 +418,8 @@ async function handleBalancerMessage(conn: BalancerConnection, message: MsgB2M) 
 		join: async message => {
 			const msg = message.payload;
 			const client = new BalancerClient(msg.room, msg.client, conn);
-			connections.push(client);
-			client.on("auth", onClientAuth);
-			client.on("message", onClientMessage);
-			client.on("disconnect", onClientDisconnect);
-			client.auth(msg.token);
+			addClient(client);
+			await client.auth(msg.token);
 		},
 		leave: async message => {
 			const msg = message.payload;
@@ -541,11 +572,16 @@ async function onUserModified(token: AuthToken): Promise<void> {
 	log.debug(`User was modified, pulling info and telling rooms`);
 	for (const client of connections) {
 		if (client.token === token) {
-			client.session = await tokens.getSessionInfo(token);
-			await makeRoomRequest(client, {
-				type: RoomRequestType.UpdateUser,
-				info: client.getClientInfo(),
-			});
+			// One client failing here says nothing about the others holding this token.
+			try {
+				client.session = await tokens.getSessionInfo(token);
+				await makeRoomRequest(client, {
+					type: RoomRequestType.UpdateUser,
+					info: client.getClientInfo(),
+				});
+			} catch (e) {
+				log.error(`Failed to update modified user on client ${client.id}: ${e}`);
+			}
 		}
 	}
 }

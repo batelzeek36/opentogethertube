@@ -34,6 +34,11 @@ export type ClientEventHandlers<E> = E extends "auth"
  */
 const MAX_BUFFERED_BYTES_FOR_BINARY = 32 * 1024;
 
+/** Parsed JSON can be anything, and only an object can be a message. */
+function isMessageShaped(msg: unknown): msg is ClientMessage {
+	return typeof msg === "object" && msg !== null;
+}
+
 export enum ClientJoinStatus {
 	WaitingForAuth,
 	Joined,
@@ -152,18 +157,31 @@ export class DirectClient extends Client {
 			}
 			return;
 		}
-		let msg: ClientMessage;
+		let msg: unknown;
 		try {
 			msg = JSON.parse(data);
 		} catch {
 			log.warn(`Dropping a message that is not valid JSON from client ${this.id}`);
 			return;
 		}
+		if (!isMessageShaped(msg)) {
+			log.warn(`Dropping a message that is not an object from client ${this.id}`);
+			return;
+		}
 		if (msg.action === "auth") {
-			this.auth(msg.token);
+			void this.authFromSocket(msg.token);
 			return;
 		}
 		this.emit("message", this, msg);
+	}
+
+	/** Nothing waits for a socket's listeners, so a failure has to stop here. */
+	private async authFromSocket(token: AuthToken): Promise<void> {
+		try {
+			await this.auth(token);
+		} catch (err) {
+			log.error(`Failed to authenticate client ${this.id}: ${err}`);
+		}
 	}
 
 	onPing() {
@@ -219,6 +237,10 @@ export class BalancerClient extends Client {
 	}
 
 	receiveMessage(msg: ClientMessage) {
+		if (!isMessageShaped(msg)) {
+			log.warn(`Dropping a message that is not an object from client ${this.id}`);
+			return;
+		}
 		this.emit("message", this, msg);
 	}
 

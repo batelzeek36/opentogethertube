@@ -585,7 +585,7 @@ export class Room implements RoomState {
 
 	private markDirty(prop: keyof RoomStateSyncable): void {
 		this._dirty.add(prop);
-		this.throttledSync();
+		void this.throttledSync();
 	}
 
 	private cleanDirty() {
@@ -919,7 +919,18 @@ export class Room implements RoomState {
 		}
 	}
 
-	throttledSync = _.debounce(this.sync, 50, { trailing: true });
+	/** Nothing waits for this, so a failure has to stop here or it takes the whole process down. */
+	throttledSync = _.debounce(
+		async () => {
+			try {
+				await this.sync();
+			} catch (e) {
+				this.log.error(`Failed to sync room: ${e}`);
+			}
+		},
+		50,
+		{ trailing: true },
+	);
 
 	/**
 	 * Serialize the room's state so that it can be stored in redis
@@ -949,7 +960,14 @@ export class Room implements RoomState {
 		});
 	}
 
-	saveStateToRedisDebounced = _.debounce(this.saveStateToRedis, 5000);
+	/** Nothing waits for this either, see throttledSync. */
+	saveStateToRedisDebounced = _.debounce(async () => {
+		try {
+			await this.saveStateToRedis();
+		} catch (e) {
+			this.log.error(`Failed to save room: ${e}`);
+		}
+	}, 5000);
 
 	private buildPreviousQueue(): QueueItem[] | null {
 		const prevQueue = [...this.queue.items];
@@ -1306,7 +1324,7 @@ export class Room implements RoomState {
 			const current = this.currentSource;
 			const prevPosition = this.realPlaybackPosition;
 			counterMediaSkipped.labels({ service: this.currentSource.service }).inc();
-			this.dequeueNext();
+			await this.dequeueNext();
 			await this.publishRoomEvent(request, context, { video: current, prevPosition });
 			this.videoSegments = [];
 		}
@@ -1375,7 +1393,7 @@ export class Room implements RoomState {
 				}
 				video.subtitleUrl = request.video.subtitleUrl;
 			}
-			this.queue.enqueue(video);
+			await this.queue.enqueue(video);
 			this.log.info(`Video added: ${JSON.stringify(request.video)}`);
 			this.prevQueue = null;
 			await this.publishRoomEvent(request, context, { video });
@@ -1397,7 +1415,7 @@ export class Room implements RoomState {
 				throw new VideoAlreadyQueuedException();
 			}
 
-			this.queue.enqueue(...videos);
+			await this.queue.enqueue(...videos);
 			this.log.info(`added ${videos.length} videos`);
 			await this.publishRoomEvent(request, context, { videos });
 			for (const vid of videos) {
@@ -1916,7 +1934,7 @@ export class Room implements RoomState {
 		}
 		if (canKickUser(context.role, this.getRole(user))) {
 			this.log.info(`${context.username} is kicking ${user.username}`);
-			this.command({ type: "kick", clientId: request.clientId });
+			await this.command({ type: "kick", clientId: request.clientId });
 		} else {
 			this.log.warn(
 				`${context.username} tried to kick ${user.username} but failed the role check`,
