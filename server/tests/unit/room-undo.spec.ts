@@ -61,12 +61,10 @@ describe("undoing a room event", () => {
 		viewer.sendRequest({ type: RoomRequestType.UndoRequest, eventId });
 		await settle();
 	};
-	const act = async (request: RoomRequest | Record<string, unknown>) => {
+	const act = async (request: unknown) => {
 		// These two have REST routes and can't come over a socket, so go the way those routes do.
-		if (
-			request.type === RoomRequestType.AddRequest ||
-			request.type === RoomRequestType.RemoveRequest
-		) {
+		const { type } = request as RoomRequest;
+		if (type === RoomRequestType.AddRequest || type === RoomRequestType.RemoveRequest) {
 			await clientmanager.makeRoomRequest(viewer, request as RoomRequest);
 		} else {
 			viewer.sendRequest(request);
