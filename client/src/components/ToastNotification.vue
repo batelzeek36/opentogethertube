@@ -26,16 +26,18 @@ import { Icon } from "@/components/ui/icon";
 import { mdiClose, mdiCheckBold, mdiAlertCircle } from "@mdi/js";
 import { ref, toRefs, onMounted, onUnmounted, type Ref, computed } from "vue";
 import { type Toast, ToastStyle } from "@/models/toast";
-import { RoomRequestType } from "ott-common/models/messages";
+import { permissionsToUndo } from "ott-common/undo";
 import { API } from "@/common-http";
 import toasts from "@/util/toast";
 import { useStore } from "@/store";
+import { useGrants } from "./composables/grants";
 import ProcessedText from "./ProcessedText.vue";
 
 const props = defineProps<{ toast: Toast; number?: number }>();
 
 const { toast } = toRefs(props);
 const store = useStore();
+const granted = useGrants();
 const closeTimeoutId: Ref<ReturnType<typeof setTimeout> | null> = ref(null);
 
 onMounted(() => {
@@ -84,22 +86,17 @@ const icon = computed(() => {
 });
 
 const undoable = computed(() => {
-	if (!toast.value.event) {
+	if (!toast.value.event?.id) {
 		return false;
 	}
-	const eventType = toast.value.event.request.type;
-	return (
-		eventType === RoomRequestType.SeekRequest ||
-		eventType === RoomRequestType.SkipRequest ||
-		eventType === RoomRequestType.AddRequest ||
-		eventType === RoomRequestType.RemoveRequest
-	);
+	const needed = permissionsToUndo(toast.value.event.request.type);
+	return needed !== undefined && needed.every(permission => granted(permission));
 });
 
 async function undo() {
 	try {
 		await API.post(`/room/${store.state.room.name}/undo`, {
-			data: { event: toast.value.event },
+			eventId: toast.value.event?.id,
 		});
 		close();
 	} catch (err) {

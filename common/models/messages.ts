@@ -98,8 +98,13 @@ export interface ServerMessageChatReactions extends ServerMessageBase {
 	closed?: ChatMessageId[];
 }
 
+/** Refers to a room event the server remembers, so clients never have to describe one. */
+export type RoomEventId = string;
+
 export interface ServerMessageEvent extends ServerMessageBase {
 	action: "event";
+	/** What to undo this event by. Only events that can be undone have one. */
+	id?: RoomEventId;
 	request: RoomRequest;
 	user: Pick<RoomUserInfo, "name" | "isLoggedIn">;
 	additional: RoomEventContext;
@@ -413,7 +418,7 @@ export interface VoiceAllowRequest extends RoomRequestBase {
 
 export interface UndoRequest extends RoomRequestBase {
 	type: RoomRequestType.UndoRequest;
-	event: ServerMessageEvent;
+	eventId: RoomEventId;
 }
 
 export interface ApplySettingsRequest extends RoomRequestBase {

@@ -28,8 +28,10 @@ export const toastModule: Module<ToastState, unknown> = {
 							state.notifications.length - 1,
 							1,
 						);
+						// These read as one seek now, so undoing goes back to before the first.
 						notification.event.additional.prevPosition =
 							removed[0].event?.additional.prevPosition;
+						notification.event.id = removed[0].event?.id;
 					}
 				}
 			}

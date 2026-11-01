@@ -63,6 +63,10 @@ const QueueItemExtrasSchema = z.object({
 
 const VideoAddSchema = VideoIdSchema.extend(QueueItemExtrasSchema.shape);
 
+export const OttApiRequestUndoSchema = z.object({
+	eventId: z.string(),
+});
+
 export const OttApiRequestVoteSchema = z.object({
 	...VideoIdSchema.shape,
 });

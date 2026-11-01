@@ -5,6 +5,7 @@ import { VOICE_RULE_DEFAULTS } from "ott-common/models/voice.js";
 import { VoiceRulesSchema } from "ott-common/models/zod-schemas.js";
 import { VoiceChannels } from "./voice.js";
 import { ChatReactions } from "./chat-reactions.js";
+import { UndoableEvents } from "./room-undo.js";
 import { redisClient } from "./redisclient.js";
 import { getLogger } from "./logger.js";
 import type winston from "winston";
@@ -278,6 +279,8 @@ export class Room implements RoomState {
 		personKey: clientId => this.personKey(clientId),
 		clientIds: () => this.realusers.map(user => user.id),
 	});
+	/** Held in memory only: an event's undo button does not outlive the room being loaded. */
+	undoableEvents = new UndoableEvents(this);
 	/** Reactions on chat messages. Held in memory only, see ChatReactions. */
 	chatReactions = new ChatReactions({
 		personKey: clientId => this.personKey(clientId),
@@ -678,6 +681,7 @@ export class Room implements RoomState {
 		const user = this.getUserInfo(context.clientId);
 		await this.publish({
 			action: "event",
+			id: this.undoableEvents.record(request, additional ?? {}),
 			request,
 			user,
 			additional: additional ?? {},
@@ -1592,54 +1596,7 @@ export class Room implements RoomState {
 	}
 
 	public async undo(request: UndoRequest, context: RoomRequestContext): Promise<void> {
-		// FIXME: room event type definitions suck ass, and needs to be reworked
-		switch (request.event.request.type) {
-			case RoomRequestType.SeekRequest:
-				if (request.event.additional.prevPosition) {
-					await this.processRequest(
-						{
-							type: request.event.request.type,
-							value: request.event.additional.prevPosition,
-						},
-						context,
-					);
-				}
-				break;
-			case RoomRequestType.SkipRequest:
-				if (this.currentSource) {
-					this.queue.pushTop(this.currentSource);
-				}
-				if (request.event.additional.video && request.event.additional.prevPosition) {
-					this.currentSource = request.event.additional.video;
-					this.playbackPosition = request.event.additional.prevPosition;
-				}
-				break;
-			case RoomRequestType.AddRequest:
-				if (this.queue.length > 0 && request.event.request.video) {
-					const removeReq: RemoveRequest = {
-						type: RoomRequestType.RemoveRequest,
-						video: request.event.request.video,
-					};
-					await this.processRequest(removeReq, context);
-				} else {
-					this.currentSource = null;
-				}
-				break;
-			case RoomRequestType.RemoveRequest:
-				if (
-					request.event.additional.video &&
-					request.event.additional.queueIdx !== undefined
-				) {
-					this.queue.insert(
-						request.event.additional.video,
-						request.event.additional.queueIdx,
-					);
-				}
-				break;
-			default:
-				this.log.error(`Event ${request.event.request.type} is not undoable, ignoring`);
-				break;
-		}
+		await this.undoableEvents.undo(request.eventId, context);
 	}
 
 	public async vote(request: VoteRequest, context: RoomRequestContext): Promise<void> {

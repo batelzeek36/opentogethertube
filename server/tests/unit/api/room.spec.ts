@@ -5,11 +5,15 @@ import {
 	beforeAll,
 	afterAll,
 	afterEach,
+	beforeEach,
 	vi,
 	type MockInstance,
 } from "vitest";
 import _ from "lodash";
-import { type AuthToken, QueueMode, Visibility } from "ott-common/models/types.js";
+import { type AuthToken, QueueMode, Role, Visibility } from "ott-common/models/types.js";
+import { RoomRequestType, type ServerMessageEvent } from "ott-common/models/messages.js";
+import type { Video } from "ott-common/models/video.js";
+import permissions from "ott-common/permissions.js";
 import request from "supertest";
 import tokens from "../../../../server/auth/tokens.js";
 import roommanager from "../../../../server/roommanager.js";
@@ -21,6 +25,9 @@ import type { OttApiRequestRoomCreate } from "ott-common/models/rest-api.js";
 import { conf } from "../../../../server/ott-config.js";
 import type { User } from "../../../models/user.js";
 import { UnloadReason } from "../../../generated.js";
+import clientmanager from "../../../clientmanager.js";
+import { Client } from "../../../client.js";
+import type { Room } from "../../../room.js";
 
 const JSON_CONTENT_TYPE_REGEX = /json/;
 
@@ -164,6 +171,112 @@ describe("Room API", () => {
 			expect(resp.body.success).toEqual(false);
 			expect(resp.body.error).toBeRoomNotFound();
 		});
+	});
+
+	describe("POST /room/:name/undo", () => {
+		class ViewerClient extends Client {
+			get clientType() {
+				return "test";
+			}
+			sendRaw(): void {
+				// These tests look at the room, not at what reaches the socket.
+			}
+			kick(): void {
+				this.emit("disconnect", this);
+			}
+		}
+
+		const MOVIE = { service: "direct", id: "movie", title: "movie" } as Video;
+		const INJECTED = { service: "direct", id: "injected", title: "injected" } as Video;
+		let room: Room;
+		let viewerToken: AuthToken;
+
+		const undo = (body: unknown) =>
+			request(app)
+				.post("/api/room/undoable/undo")
+				.auth(viewerToken, { type: "bearer" })
+				.send(body as object);
+
+		async function connectViewer() {
+			const viewer = new ViewerClient("undoable");
+			viewer.token = viewerToken;
+			viewer.session = await tokens.getSessionInfo(viewerToken);
+			clientmanager.addClient(viewer);
+			viewer.emit("auth", viewer, viewerToken, viewer.session);
+			await vi.waitFor(() => expect(room.getUser(viewer.id)).toBeDefined());
+		}
+
+		async function seekThenGetEventId(): Promise<string> {
+			const publish = vi.spyOn(room, "publish");
+			await room.processUnauthorizedRequest(
+				{ type: RoomRequestType.SeekRequest, value: 500 },
+				{ token: viewerToken },
+			);
+			const event = publish.mock.calls
+				.map(([msg]) => msg)
+				.find(msg => msg.action === "event") as ServerMessageEvent;
+			publish.mockRestore();
+			return event.id as string;
+		}
+
+		beforeEach(async () => {
+			const auth = await request(app).get("/api/auth/grant");
+			viewerToken = auth.body.token;
+			await roommanager.createRoom({ name: "undoable", isTemporary: true });
+			room = (await roommanager.getRoom("undoable")).unwrap();
+			await connectViewer();
+			room.currentSource = MOVIE;
+			room.playbackPosition = 100;
+		});
+
+		afterEach(async () => {
+			await roommanager.unloadRoom("undoable", UnloadReason.Admin);
+		});
+
+		it("undoes an event that happened for someone permitted", async () => {
+			const eventId = await seekThenGetEventId();
+			const resp = await undo({ eventId }).expect(200);
+			expect(resp.body.success).toEqual(true);
+			expect(room.playbackPosition).toEqual(100);
+		});
+
+		it("refuses a chat-only viewer with a real event", async () => {
+			const eventId = await seekThenGetEventId();
+			room.grants.setRoleGrants(
+				Role.UnregisteredUser,
+				permissions.parseIntoGrantMask(["chat"]),
+			);
+			const resp = await undo({ eventId }).expect(400);
+			expect(resp.body.error.name).toEqual("PermissionDeniedException");
+			expect(room.playbackPosition).toEqual(500);
+		});
+
+		it("does not enact an event from the request body", async () => {
+			const resp = await undo({
+				data: {
+					event: {
+						request: { type: RoomRequestType.SkipRequest },
+						additional: { video: INJECTED, prevPosition: 1234 },
+					},
+				},
+			}).expect(400);
+			expect(resp.body.success).toEqual(false);
+			expect(room.currentSource).toEqual(MOVIE);
+		});
+
+		it("refuses an event that never happened", async () => {
+			const resp = await undo({ eventId: "not-an-event" }).expect(400);
+			expect(resp.body.error.name).toEqual("EventNotUndoableException");
+			expect(room.currentSource).toEqual(MOVIE);
+		});
+
+		it.each([[undefined], [null], ["text"], [{ eventId: 5 }], [{ eventId: {} }]])(
+			"answers a body of %j with an error",
+			async body => {
+				const resp = await undo(body).expect(400);
+				expect(resp.body.success).toEqual(false);
+			},
+		);
 	});
 
 	describe("POST /room/create", () => {
