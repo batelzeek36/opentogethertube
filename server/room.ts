@@ -1686,8 +1686,12 @@ export class Room implements RoomState {
 			case Role.TrustedUser:
 				perm = "manage-users.promote-trusted-user";
 				break;
-			default:
+			case Role.RegisteredUser:
+			case Role.UnregisteredUser:
+			case Role.Owner:
 				break;
+			default:
+				throw new ImpossiblePromotionException();
 		}
 		if (perm) {
 			this.grants.check(context.role, perm);

@@ -14,6 +14,7 @@ import tokens, { type SessionInfo } from "../../auth/tokens.js";
 import { RoomRequestType } from "ott-common/models/messages.js";
 import { type AuthToken, BehaviorOption, QueueMode, Role } from "ott-common/models/types.js";
 import { Room, RoomUser } from "../../room.js";
+import type { User } from "../../models/user.js";
 import infoextractor from "../../infoextractor.js";
 import type { Video, VideoId } from "ott-common/models/video.js";
 import permissions from "ott-common/permissions.js";
@@ -988,6 +989,49 @@ describe("Room", () => {
 		});
 
 		expect(await room.getRoleFromToken("fake")).toEqual(Role.RegisteredUser);
+	});
+
+	describe("promoting users", () => {
+		const context = { username: "viewer", role: Role.UnregisteredUser, clientId: "viewer" };
+		const promote = (role: unknown) => ({
+			type: RoomRequestType.PromoteRequest as const,
+			targetClientId: "moderator",
+			role: role as Role,
+		});
+		let room: Room;
+		let moderator: RoomUser;
+
+		beforeEach(() => {
+			room = new Room({ name: "test" });
+			moderator = new RoomUser("moderator", "moderator-token");
+			moderator.user_id = 7;
+			moderator.user = { id: 7, username: "moderator" } as User;
+			room.realusers = [moderator, new RoomUser("viewer", "viewer-token")];
+			room.userRoles.get(Role.Moderator)?.add(7);
+		});
+
+		it.each([[5], ["4"], [2.5], [null], [{}]])(
+			"does not take a role away with a role that does not exist: %s",
+			async role => {
+				await expect(room.processRequest(promote(role), context)).rejects.toThrow();
+				expect(room.getRole(moderator)).toEqual(Role.Moderator);
+			},
+		);
+
+		it("does not let a viewer demote someone with a real role", async () => {
+			await expect(
+				room.processRequest(promote(Role.RegisteredUser), context),
+			).rejects.toThrow(PermissionDeniedException);
+			expect(room.getRole(moderator)).toEqual(Role.Moderator);
+		});
+
+		it("lets someone with the grant promote and demote", async () => {
+			const owner = { ...context, role: Role.Owner };
+			await room.processRequest(promote(Role.Administrator), owner);
+			expect(room.getRole(moderator)).toEqual(Role.Administrator);
+			await room.processRequest(promote(Role.RegisteredUser), owner);
+			expect(room.getRole(moderator)).toEqual(Role.RegisteredUser);
+		});
 	});
 
 	describe("restore queue behavior", () => {

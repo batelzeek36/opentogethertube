@@ -27,6 +27,7 @@ import tokens, { type SessionInfo } from "./auth/tokens.js";
 import { Gauge } from "prom-client";
 import { replacer } from "ott-common/serialize.js";
 import { type Client, ClientJoinStatus, DirectClient, BalancerClient } from "./client.js";
+import { isClientSendableRequest } from "./client-requests.js";
 import {
 	type BalancerConnection,
 	type MsgB2M,
@@ -206,6 +207,10 @@ async function onClientMessage(client: Client, msg: ClientMessage) {
 				info: { id: client.id, device: msg.device },
 			});
 		} else if (msg.action === "req") {
+			if (!isClientSendableRequest(msg.request)) {
+				log.warn(`Refused a room request a client may not send, from client ${client.id}`);
+				return;
+			}
 			// Audio is binary, which the balancer protocol cannot carry.
 			if (
 				client instanceof BalancerClient &&
