@@ -66,14 +66,41 @@
 						<span class="text-muted-foreground">{{ $t("voice.empty") }}</span>
 					</template>
 					<span v-for="(member, i) in channel.members" :key="member"
-						><span
-							:class="member === channel.speaker ? 'font-bold text-primary' : ''"
+						><component
+							:is="member === voice.myId.value ? 'span' : 'button'"
+							:type="member === voice.myId.value ? undefined : 'button'"
+							:class="[
+								member === channel.speaker ? 'font-bold text-primary' : '',
+								member !== voice.myId.value ? 'voice-person' : '',
+								voice.isSilenced(member) ? 'voice-person-silenced' : '',
+							]"
+							:aria-pressed="
+								member === voice.myId.value ? undefined : voice.isSilenced(member)
+							"
+							:aria-label="
+								member === voice.myId.value
+									? undefined
+									: $t(
+											voice.isSilenced(member)
+												? 'voice.unsilence-person'
+												: 'voice.silence-person',
+											{
+												name: nameOf(member),
+											},
+									  )
+							"
 							:data-speaking="member === channel.speaker"
+							:data-cy="member === voice.myId.value ? undefined : 'voice-person'"
+							@click="
+								member === voice.myId.value
+									? undefined
+									: voice.toggleSilenced(member)
+							"
 							>{{
 								member === channel.speaker
 									? $t("voice.name-talking", { name: nameOf(member) })
 									: nameOf(member)
-							}}</span
+							}}</component
 						><template v-if="i < channel.members.length - 1">, </template></span
 					>
 				</span>
@@ -92,6 +119,14 @@
 				</Button>
 			</li>
 		</ul>
+
+		<p
+			v-if="voice.myChannel.value && hasOtherMembers"
+			class="text-xs text-muted-foreground"
+			data-cy="voice-person-hint"
+		>
+			{{ $t("voice.person-hint") }}
+		</p>
 
 		<p
 			v-if="voice.notice.value"
@@ -202,6 +237,10 @@ const showRoster = computed(
 		channels.value.some(channel => channel.members.length > 0),
 );
 
+const hasOtherMembers = computed(() =>
+	channels.value.some(channel => channel.members.some(member => member !== voice.myId.value)),
+);
+
 function nameOf(clientId: string): string {
 	return store.state.users.users.get(clientId)?.name ?? t("voice.someone");
 }
@@ -220,3 +259,19 @@ const hasPeopleToManage = computed(
 	() => removableMembers.value.length > 0 || voice.removedIds.value.length > 0,
 );
 </script>
+
+<style scoped>
+.voice-person {
+	min-height: 28px;
+	cursor: pointer;
+	text-align: left;
+	text-decoration: underline dotted;
+	text-underline-offset: 3px;
+	touch-action: manipulation;
+}
+
+.voice-person-silenced {
+	text-decoration: line-through;
+	opacity: 0.6;
+}
+</style>

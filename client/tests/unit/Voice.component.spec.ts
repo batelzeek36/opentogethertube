@@ -509,6 +509,42 @@ describe("voice", () => {
 		});
 	});
 
+	describe("muting one person on this device", () => {
+		afterEach(() => {
+			sessionStorage.clear();
+		});
+
+		it("stops their audio here until tapped again, and leaves others alone", async () => {
+			vi.useFakeTimers();
+			const { wrapper, connection, audio } = setup();
+			connection.mockReceive(voiceMsg(["me", "mom", "sis"], [], "mom"));
+			await vi.advanceTimersByTimeAsync(0);
+			connection.binaryHandler?.(frame());
+			expect(audio.played).toHaveLength(1);
+
+			const mom = () =>
+				wrapper.findAll('[data-cy="voice-person"]').find(p => p.text().includes("Mom"))!;
+			await mom().trigger("click");
+			expect(mom().attributes("aria-pressed")).toBe("true");
+			connection.binaryHandler?.(frame());
+			expect(audio.played).toHaveLength(1);
+
+			connection.mockReceive(voiceMsg(["me", "mom", "sis"], [], "sis"));
+			await vi.advanceTimersByTimeAsync(0);
+			connection.binaryHandler?.(frame());
+			expect(audio.played).toHaveLength(2);
+
+			connection.mockReceive(voiceMsg(["me", "mom", "sis"], [], "mom"));
+			await vi.advanceTimersByTimeAsync(0);
+			await mom().trigger("click");
+			connection.binaryHandler?.(frame());
+			expect(audio.played).toHaveLength(3);
+
+			connection.mockReceive(voiceMsg(["me", "mom", "sis"]));
+			await vi.advanceTimersByTimeAsync(300);
+		});
+	});
+
 	describe("movie volume", () => {
 		it("dips while someone in the channel talks and returns to exactly 1", async () => {
 			vi.useFakeTimers();

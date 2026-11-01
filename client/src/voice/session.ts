@@ -31,6 +31,7 @@ import type { Store } from "vuex";
 import { type MicResult, VoiceAudio, type VoiceAudioDevice } from "./audio";
 
 /** How far the movie drops while someone talks: a quarter of the person's own volume. */
+const SILENCED_NAMES_KEY = "voiceSilencedNames";
 const DUCK_LEVEL = 0.25;
 const DUCK_RAMP_STEPS = 5;
 const DUCK_RAMP_STEP_MS = 30;
@@ -54,6 +55,23 @@ export type VoiceSession = ReturnType<typeof createVoiceSession>;
  * Everything voice does in one room view: membership, the talk button's state, and tying the
  * network to the audio device. The server decides who may talk. This only follows what it says.
  */
+function loadSilencedNames(): string[] {
+	try {
+		const saved: unknown = JSON.parse(sessionStorage.getItem(SILENCED_NAMES_KEY) ?? "[]");
+		return Array.isArray(saved) ? saved.filter(name => typeof name === "string") : [];
+	} catch {
+		return [];
+	}
+}
+
+function saveSilencedNames(names: string[]) {
+	try {
+		sessionStorage.setItem(SILENCED_NAMES_KEY, JSON.stringify(names));
+	} catch {
+		// Private windows can refuse this. It then lasts until the page reloads.
+	}
+}
+
 export function createVoiceSession(deps: {
 	connection: OttRoomConnection;
 	store: Store<FullOTTStoreState>;
@@ -260,8 +278,41 @@ export function createVoiceSession(deps: {
 		}
 	};
 
+	/*
+	 * Per person, on this device only. Someone watching on a computer and talking on a phone mutes
+	 * their phone here, or the computer plays their voice back into the phone's mic as an echo.
+	 * Kept by name, because a person's client id changes when they reload.
+	 */
+	const silencedNames = shallowRef<string[]>(loadSilencedNames());
+
+	function nameOfClient(clientId: ClientId): string | undefined {
+		return store.state.users.users.get(clientId)?.name;
+	}
+
+	function isSilenced(clientId: ClientId): boolean {
+		const name = nameOfClient(clientId);
+		return name !== undefined && silencedNames.value.includes(name);
+	}
+
+	function toggleSilenced(clientId: ClientId) {
+		const name = nameOfClient(clientId);
+		if (name === undefined) {
+			return;
+		}
+		silencedNames.value = silencedNames.value.includes(name)
+			? silencedNames.value.filter(other => other !== name)
+			: [...silencedNames.value, name];
+		saveSilencedNames(silencedNames.value);
+		if (speakerInMyChannel.value === clientId && audioOpen) {
+			audio.resetPlayback();
+		}
+	}
+
 	function onBinary(data: ArrayBuffer) {
 		if (myChannel.value === null || !isValidVoiceFrame(new Uint8Array(data))) {
+			return;
+		}
+		if (speakerInMyChannel.value !== null && isSilenced(speakerInMyChannel.value)) {
 			return;
 		}
 		audio.playFrame(data.slice(VOICE_FRAME_HEADER_BYTES));
@@ -444,6 +495,8 @@ export function createVoiceSession(deps: {
 	}
 
 	return {
+		isSilenced,
+		toggleSilenced,
 		channels,
 		removedIds,
 		micState,

@@ -353,6 +353,9 @@ export default {
 		"voice-owner-only": "Only the room owner can change the voice rules.",
 	},
 	voice: {
+		"silence-person": "Mute {name} on this device",
+		"unsilence-person": "Unmute {name} on this device",
+		"person-hint": "Tap a name to mute that person on this device only.",
 		title: "Voice",
 		join: "Join voice",
 		"join-channel": "Join voice in {channel}",
