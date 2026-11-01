@@ -340,6 +340,7 @@ import { secondsToTimestamp } from "@/util/timestamp";
 import { useCaptions, useMediaPlayer, useVolume } from "@/components/composables";
 import { useGrants } from "@/components/composables/grants";
 import { isOfficialSite } from "@/util/misc";
+import { DriftCorrector } from "@/util/drift-correction";
 import { Visibility } from "ott-common/models/types";
 
 const VIDEO_CONTROLS_HIDE_TIMEOUT = 3000;
@@ -478,21 +479,46 @@ export default defineComponent({
 			}
 		});
 
-		watch(truePosition, async newPosition => {
+		const driftCorrector = new DriftCorrector();
+
+		async function followRoomPosition(newPosition: number) {
 			if (!player.isPlayerPresent()) {
 				return;
 			}
-			const currentTime = player.getPosition();
+			const currentTime = await player.getPosition();
 
-			const diff = Math.abs(newPosition - (await currentTime));
-			if (isNaN(diff)) {
+			const drift = newPosition - currentTime;
+			if (isNaN(drift)) {
 				console.error("player diff is NaN, this is a bug", newPosition, currentTime);
 				return;
 			}
-			if (diff > 1 && !mediaPlaybackBlocked.value) {
+			const syncRatePlayer = player.getSyncRatePlayer();
+			if (!syncRatePlayer) {
+				if (Math.abs(drift) > 1 && !mediaPlaybackBlocked.value) {
+					player.setPosition(newPosition);
+				}
+				return;
+			}
+			const { seek, rate } = driftCorrector.step({
+				drift,
+				roomSpeed: store.state.room.playbackSpeed,
+				roomPlaying: store.state.room.isPlaying,
+				blocked: mediaPlaybackBlocked.value,
+				settled: syncRatePlayer.isSettled(),
+				canAdjustRate: syncRatePlayer.canAdjustRate(),
+				now: performance.now(),
+			});
+			syncRatePlayer.setSyncRate(rate);
+			if (seek) {
 				player.setPosition(newPosition);
 			}
-		});
+		}
+
+		watch(truePosition, followRoomPosition);
+		watch(
+			() => store.state.room.currentSource,
+			() => driftCorrector.reset(),
+		);
 
 		// connection status
 		const isConnected = computed(() => connection.connected);
@@ -626,6 +652,12 @@ export default defineComponent({
 		// Indicates that starting playback is blocked by the browser. This usually means that the user needs
 		// to interact with the page before playback can start. This is because browsers block autoplaying videos.
 		const mediaPlaybackBlocked = ref(false);
+
+		// The position stops changing when the room pauses, and the player must not stay off speed.
+		watch(
+			() => [store.state.room.isPlaying, mediaPlaybackBlocked.value],
+			() => followRoomPosition(truePosition.value),
+		);
 
 		async function applyIsPlaying(playing: boolean): Promise<void> {
 			await waitForPlayer();
