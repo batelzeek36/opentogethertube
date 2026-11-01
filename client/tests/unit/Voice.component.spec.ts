@@ -541,7 +541,19 @@ describe("voice", () => {
 			expect(duck.value).toEqual(1);
 			connection.mockReceive(voiceMsg(["me", "mom"], [], "me"));
 			await vi.advanceTimersByTimeAsync(300);
-			expect(duck.value).toEqual(0.25);
+			expect(duck.value).toEqual(0);
+		});
+
+		it("silences the movie for the person talking, then restores it", async () => {
+			vi.useFakeTimers();
+			const duck = useVolumeDuck();
+			const { connection } = setup();
+			connection.mockReceive(voiceMsg(["me", "mom"], [], "me"));
+			await vi.advanceTimersByTimeAsync(300);
+			expect(duck.value).toEqual(0);
+			connection.mockReceive(voiceMsg(["me", "mom"]));
+			await vi.advanceTimersByTimeAsync(300);
+			expect(duck.value).toEqual(1);
 		});
 	});
 

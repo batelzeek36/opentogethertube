@@ -157,6 +157,11 @@ export function createVoiceSession(deps: {
 		audio.setMuted(muted.value);
 		sendRequest({ type: RoomRequestType.VoiceJoinRequest, channel });
 		await prepareMic();
+		// Asked for now so the first press is ready, but not kept open: an open Bluetooth mic
+		// drops the earbuds into call quality, which takes the movie's sound with it.
+		if (!holding.value) {
+			audio.releaseMicSoon();
+		}
 	}
 
 	function leave() {
@@ -390,7 +395,14 @@ export function createVoiceSession(deps: {
 			}
 		}, DUCK_RAMP_STEP_MS);
 	}
-	watch(shouldDuck, ducked => rampDuck(ducked ? DUCK_LEVEL : 1));
+	// Silent for the person talking, or their mic carries the movie and it sounds like an echo.
+	const duckTarget = computed(() => {
+		if (!shouldDuck.value) {
+			return 1;
+		}
+		return speakerInMyChannel.value === myId.value ? 0 : DUCK_LEVEL;
+	});
+	watch(duckTarget, rampDuck);
 
 	// Nothing may leave a finger stuck on talk: a finger sliding off is handled by the button itself,
 	// the page going away by these, and opening the chat hides the button.

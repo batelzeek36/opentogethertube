@@ -13,7 +13,7 @@ const VOICE_WORKLET_URL = `${import.meta.env.BASE_URL}voice-worklet.js?v=1`;
  * window a press is instant. After it the mic is fully released, so the phone stops showing it as
  * in use and the movie's sound leaves the phone's call audio mode, and the next press reopens it.
  */
-const MIC_WARM_MS = 15_000;
+const MIC_WARM_MS = 5_000;
 
 export type MicResult = "ready" | "denied" | "none";
 
