@@ -34,6 +34,42 @@ describe("Chat component", () => {
 		Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
 	});
 
+	describe("following new messages", () => {
+		function scrollState(
+			el: Element,
+			scrollHeight: number,
+			clientHeight: number,
+			scrollTop: number,
+		) {
+			Object.defineProperty(el, "scrollHeight", { configurable: true, value: scrollHeight });
+			Object.defineProperty(el, "clientHeight", { configurable: true, value: clientHeight });
+			el.scrollTop = scrollTop;
+		}
+
+		it("keeps following when content grows without the reader scrolling", async () => {
+			const { wrapper } = mountComponent(Chat);
+			const messages = wrapper.get(".messages");
+			scrollState(messages.element, 500, 100, 400);
+			await messages.trigger("scroll");
+			scrollState(messages.element, 560, 100, 400);
+			await messages.trigger("scroll");
+			expect(wrapper.find(".to-bottom").exists()).toBe(false);
+		});
+
+		it("stops following when the reader scrolls up, and resumes at the bottom", async () => {
+			const { wrapper } = mountComponent(Chat);
+			const messages = wrapper.get(".messages");
+			scrollState(messages.element, 500, 100, 400);
+			await messages.trigger("scroll");
+			scrollState(messages.element, 500, 100, 200);
+			await messages.trigger("scroll");
+			expect(wrapper.find(".to-bottom").exists()).toBe(true);
+			scrollState(messages.element, 500, 100, 395);
+			await messages.trigger("scroll");
+			expect(wrapper.find(".to-bottom").exists()).toBe(false);
+		});
+	});
+
 	it("sends the message when enter is pressed", async () => {
 		const { wrapper, connection } = mountComponent(Chat);
 		await wrapper.get('[data-cy="chat-activate"]').trigger("click");

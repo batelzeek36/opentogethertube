@@ -492,18 +492,18 @@ describe("Chat in Movie only", () => {
 		text: "hello",
 	};
 
-	it("keeps the message for later but makes no sound over the movie", async () => {
+	it("keeps the message for later and never makes a sound", async () => {
 		const play = vi.spyOn(OttSfx.prototype, "play").mockResolvedValue(undefined);
 		const { wrapper, connection } = mountComponent(Chat);
 
 		connection.mockReceive(msg);
 		await nextTick();
-		expect(play).toHaveBeenCalledTimes(1);
+		expect(play).not.toHaveBeenCalled();
 
 		movieOnlyActive.value = true;
 		connection.mockReceive(msg);
 		await nextTick();
-		expect(play).toHaveBeenCalledTimes(1);
+		expect(play).not.toHaveBeenCalled();
 		expect(wrapper.text().match(/hello/g)).toHaveLength(2);
 		play.mockRestore();
 	});

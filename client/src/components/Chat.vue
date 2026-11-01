@@ -20,7 +20,7 @@
 		</div>
 		<div ref="messages" @scroll="onScroll" class="messages grow">
 			<div class="grow"><!-- Spacer --></div>
-			<transition-group name="message">
+			<transition-group name="message" @after-enter="enforceStickToBottom">
 				<ChatMsg
 					:msg="msg"
 					v-for="(msg, index) in chatMessagePast"
@@ -84,13 +84,12 @@ import { useConnection } from "@/plugins/connection";
 import { useRoomApi } from "@/util/roomapi";
 import type { ServerMessageChat } from "ott-common/models/messages";
 import { useRoomKeyboardShortcuts } from "@/util/keyboard-shortcuts";
-import { useSfx } from "@/plugins/sfx";
-import { movieOnlyActive } from "./composables/movie-only";
 import ChatMsg from "./ChatMsg.vue";
 import { chatMessagePast, chatMessageRecent, chatOpen } from "./chat-state";
 
 const MSG_SHOW_TIMEOUT = 20000;
 const KEYBOARD_MIN_HEIGHT = 100;
+const STICK_DISTANCE_PX = 8;
 
 const emit = defineEmits(["link-click"]);
 const props = defineProps({
@@ -105,6 +104,7 @@ const roomapi = useRoomApi(connection);
 
 const inputValue = ref("");
 const stickToBottom = ref(true);
+let lastScrollTop = 0;
 /**
  * When chat is activated, all messages are shown. and the
  * user can scroll through message history, type in chat, etc.
@@ -197,15 +197,10 @@ async function setActivated(value: boolean, manual = false): Promise<void> {
 	}
 }
 
-const sfx = useSfx();
 function onChatReceived(msg: ServerMessageChat): void {
 	chatMessageRecent.value.push(msg);
 	setTimeout(expireChatMessage, MSG_SHOW_TIMEOUT);
 	nextTick(enforceStickToBottom);
-	// The TV should only be heard playing the movie.
-	if (!movieOnlyActive.value) {
-		sfx.play("pop");
-	}
 }
 
 function expireChatMessage() {
@@ -246,7 +241,16 @@ function onScroll() {
 		return;
 	}
 	const distToBottom = div.scrollHeight - div.clientHeight - div.scrollTop;
-	stickToBottom.value = distToBottom === 0;
+	/*
+	 * Only the reader scrolling up stops the chat following. A message animating in and a phone's
+	 * fractional scroll position both leave a small distance without anyone having scrolled.
+	 */
+	if (distToBottom <= STICK_DISTANCE_PX) {
+		stickToBottom.value = true;
+	} else if (div.scrollTop < lastScrollTop) {
+		stickToBottom.value = false;
+	}
+	lastScrollTop = div.scrollTop;
 }
 
 function forceToBottom() {
