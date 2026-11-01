@@ -95,11 +95,16 @@
 							class="voice-floating-position"
 						/>
 						<div
-							class="movie-only-play absolute inset-0 z-200 flex items-center justify-center"
+							class="movie-only-play pointer-events-none absolute inset-0 z-200 flex items-center justify-center"
 							data-movie-only-keep
 							v-if="mediaPlaybackBlocked"
 						>
-							<Button size="xl" variant="default" @click="onClickUnblockPlayback">
+							<Button
+								class="pointer-events-auto"
+								size="xl"
+								variant="default"
+								@click="onClickUnblockPlayback"
+							>
 								<Icon :icon="mdiPlay" class="size-5" />
 								{{ $t("common.play") }}
 							</Button>
