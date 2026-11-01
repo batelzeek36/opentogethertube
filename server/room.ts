@@ -1,4 +1,5 @@
 import permissions, { type GrantMask, Grants } from "ott-common/permissions.js";
+import { isDeviceType, type DeviceType } from "ott-common/models/device.js";
 import { isReaction } from "ott-common/models/reactions.js";
 import { VOICE_RULE_DEFAULTS } from "ott-common/models/voice.js";
 import { VoiceRulesSchema } from "ott-common/models/zod-schemas.js";
@@ -106,6 +107,7 @@ export class RoomUser {
 	unregisteredUsername = "";
 	user: User | null;
 	playerStatus: PlayerStatus = PlayerStatus.none;
+	device?: DeviceType;
 
 	constructor(id: ClientId, token: AuthToken) {
 		this.id = id;
@@ -133,6 +135,9 @@ export class RoomUser {
 			this.unregisteredUsername = info.username;
 			this.user_id = undefined;
 			this.user = null;
+		}
+		if (isDeviceType(info.device)) {
+			this.device = info.device;
 		}
 		if (info.status) {
 			this.playerStatus = info.status;
@@ -568,6 +573,7 @@ export class Room implements RoomState {
 				isLoggedIn: user.isLoggedIn,
 				status: user.playerStatus,
 				role: this.getRole(user),
+				device: user.device,
 			};
 			infos.push(info);
 		}

@@ -101,7 +101,10 @@
 									? $t("voice.name-talking", { name: nameOf(member) })
 									: nameOf(member)
 							}}</component
-						><template v-if="i < channel.members.length - 1">, </template></span
+						><DeviceIcon
+							:device="deviceOf(member)"
+							class="ml-1 align-text-bottom"
+						/><template v-if="i < channel.members.length - 1">, </template></span
 					>
 				</span>
 				<Button
@@ -210,6 +213,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { useGrants } from "@/components/composables/grants";
+import DeviceIcon from "@/components/DeviceIcon.vue";
 import VoiceTalkButton from "@/components/VoiceTalkButton.vue";
 import { useStore } from "@/store";
 import { useVoice } from "@/voice/session";
@@ -243,6 +247,10 @@ const hasOtherMembers = computed(() =>
 
 function nameOf(clientId: string): string {
 	return store.state.users.users.get(clientId)?.name ?? t("voice.someone");
+}
+
+function deviceOf(clientId: string) {
+	return store.state.users.users.get(clientId)?.device;
 }
 
 const myRole = computed(() => store.getters["users/self"]?.role ?? Role.UnregisteredUser);

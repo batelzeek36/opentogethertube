@@ -232,6 +232,11 @@ export default {
 		eyebrow: "The fine print",
 		contact: "Contact Info",
 	},
+	device: {
+		phone: "On a phone",
+		tablet: "On a tablet",
+		computer: "On a computer",
+	},
 	chat: {
 		title: "Chat",
 		"type-here": "Type your message here...",

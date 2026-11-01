@@ -47,6 +47,7 @@
 						class="group-data-[registered=false]:italic group-data-[registered=false]:text-muted-foreground"
 						>{{ user.name }}</span
 					>
+					<DeviceIcon :device="user.device" class="self-center" />
 					<Badge v-if="debugMode" variant="secondary" class="font-mono">
 						{{ user.id }}
 					</Badge>
@@ -169,6 +170,7 @@ import { useConnection } from "@/plugins/connection";
 import { useRoomApi } from "@/util/roomapi";
 import { canKickUser } from "ott-common/userutils";
 import { useGrants } from "./composables/grants";
+import DeviceIcon from "./DeviceIcon.vue";
 
 defineProps<{
 	users: RoomUserInfo[];

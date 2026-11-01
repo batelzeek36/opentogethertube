@@ -441,6 +441,57 @@ describe("Room", () => {
 			});
 		});
 
+		describe("device type", () => {
+			const update = (device: unknown) => ({
+				type: RoomRequestType.UpdateUser as const,
+				info: { id: "user", device } as never,
+			});
+			const context = { username: "test", role: Role.UnregisteredUser, clientId: "user" };
+
+			it("tells the room a known device type", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				await room.processRequest(update("phone"), context);
+				expect(room.getUserInfo("user").device).toEqual("phone");
+				expect(publish).toHaveBeenCalledWith(
+					expect.objectContaining({
+						action: "user",
+						update: {
+							kind: "update",
+							value: expect.objectContaining({ id: "user", device: "phone" }),
+						},
+					}),
+				);
+			});
+
+			it("has none until one is reported", () => {
+				expect(room.getUserInfo("user").device).toBeUndefined();
+			});
+
+			it.each(["smart fridge", "Mozilla/5.0 (iPhone)", 3, { $ne: 1 }])(
+				"ignores anything outside the list: %s",
+				async device => {
+					await room.processRequest(update("computer"), context);
+					await room.processRequest(update(device), context);
+					expect(room.getUserInfo("user").device).toEqual("computer");
+				},
+			);
+
+			it("keeps the device type when the person's name changes", async () => {
+				await room.processRequest(update("tablet"), context);
+				await room.processRequest(
+					{
+						type: RoomRequestType.UpdateUser,
+						info: { id: "user", username: "new name" },
+					},
+					context,
+				);
+				expect(room.getUserInfo("user")).toMatchObject({
+					name: "new name",
+					device: "tablet",
+				});
+			});
+		});
+
 		describe("chat", () => {
 			const context = { username: "test", role: Role.UnregisteredUser, clientId: "user" };
 

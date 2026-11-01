@@ -2,6 +2,7 @@ import type { OttRoomConnection } from "@/plugins/connection";
 import { type ClientMessageNotify, RoomRequestType } from "ott-common/models/messages";
 import type { ClientId, Role } from "ott-common/models/types";
 import type { VideoId } from "ott-common/models/video";
+import type { DeviceType } from "ott-common/models/device";
 import type { ChatMessageId, Reaction } from "ott-common/models/reactions";
 
 export function useRoomApi(connection: OttRoomConnection) {
@@ -102,6 +103,11 @@ class RoomApi {
 				emoji,
 			},
 		});
+	}
+
+	/** Say what kind of device this is. Nothing about the browser or the device itself is sent. */
+	reportDevice(device: DeviceType) {
+		this.connection.send({ action: "device", device });
 	}
 
 	/** Add or take back this person's reaction on a chat message. */

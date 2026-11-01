@@ -14,6 +14,7 @@ import type {
 } from "./types.js";
 import type { QueueItem, QueueItemExtras, VideoId, VideoAdd } from "./video.js";
 import type { ChatMessageId, ChatReactionCount, Reaction } from "./reactions.js";
+import type { DeviceType } from "./device.js";
 import type { VoiceChannelId, VoiceYouEvent } from "./voice.js";
 
 export type ServerMessage =
@@ -167,6 +168,7 @@ export interface UserInfo extends RoomUserInfo {
 export type ClientMessage =
 	| ClientMessageKickMe
 	| ClientMessagePlayerStatus
+	| ClientMessageDevice
 	| ClientMessageAuthenticate
 	| ClientMessageNotify
 	| ClientMessageRoomRequest;
@@ -186,6 +188,12 @@ export interface ClientMessageKickMe extends ClientMessageBase {
 export interface ClientMessagePlayerStatus extends ClientMessageBase {
 	action: "status";
 	status: PlayerStatus;
+}
+
+/** Inform the server what kind of device this is, so people can tell someone's devices apart. */
+export interface ClientMessageDevice extends ClientMessageBase {
+	action: "device";
+	device: DeviceType;
 }
 
 export interface ClientMessageAuthenticate extends ClientMessageBase {

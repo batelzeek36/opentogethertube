@@ -22,6 +22,7 @@ import {
 } from "ott-common/models/types.js";
 import roommanager from "./roommanager.js";
 import { ANNOUNCEMENT_CHANNEL, ROOM_NAME_REGEX } from "ott-common/constants.js";
+import { isDeviceType } from "ott-common/models/device.js";
 import tokens, { type SessionInfo } from "./auth/tokens.js";
 import { Gauge } from "prom-client";
 import { replacer } from "ott-common/serialize.js";
@@ -195,6 +196,15 @@ async function onClientMessage(client: Client, msg: ClientMessage) {
 				},
 			};
 			await makeRoomRequest(client, request);
+		} else if (msg.action === "device") {
+			if (!isDeviceType(msg.device)) {
+				log.debug(`Ignoring an unknown device type from client ${client.id}`);
+				return;
+			}
+			await makeRoomRequest(client, {
+				type: RoomRequestType.UpdateUser,
+				info: { id: client.id, device: msg.device },
+			});
 		} else if (msg.action === "req") {
 			// Audio is binary, which the balancer protocol cannot carry.
 			if (
