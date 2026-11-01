@@ -1,5 +1,6 @@
 <template>
 	<div
+		ref="root"
 		:class="{
 			chat: true,
 			activated: isActive,
@@ -25,7 +26,7 @@
 			class="messages grow"
 		>
 			<div class="grow"><!-- Spacer --></div>
-			<transition-group name="message" @after-enter="enforceStickToBottom">
+			<transition-group name="message" @after-enter="onMessageEntered">
 				<ChatMsg
 					:msg="msg"
 					:reactions="reactionsOf(msg)"
@@ -34,7 +35,10 @@
 					v-for="(msg, index) in chatMessagePast"
 					:key="index"
 					@link-click="emit('link-click', $event)"
-					@toggle-picker="togglePicker(msg)"
+					@menu-tap="onMessageTap(msg)"
+					@menu-key="onMessageKey(msg)"
+					@mouse-enter="onMessageMouseEnter(msg)"
+					@mouse-leave="onMessageMouseLeave(msg)"
 					@set-reaction="(emoji, add) => setReaction(msg, emoji, add)"
 				/>
 				<ChatMsg
@@ -46,11 +50,26 @@
 					v-for="(msg, index) in chatMessageRecent"
 					:key="chatMessagePast.length + index"
 					@link-click="emit('link-click', $event)"
-					@toggle-picker="togglePicker(msg)"
+					@menu-tap="onMessageTap(msg)"
+					@menu-key="onMessageKey(msg)"
+					@mouse-enter="onMessageMouseEnter(msg)"
+					@mouse-leave="onMessageMouseLeave(msg)"
 					@set-reaction="(emoji, add) => setReaction(msg, emoji, add)"
 				/>
 			</transition-group>
 		</div>
+		<ChatReactionMenu
+			v-if="menuMessage && menu.placement.value"
+			ref="menuElement"
+			:placement="menu.placement.value"
+			:reactions="reactionsOf(menuMessage)"
+			@mousedown="onMessagesMouseDown"
+			@pointerenter="onMenuPointer($event, menu.mouseEnteredMenu)"
+			@pointerleave="onMenuPointer($event, menu.mouseLeftMenu)"
+			@focusout="onMenuFocusOut"
+			@choose="onMenuChoose"
+			@escape="onMenuEscape"
+		/>
 		<div v-if="!stickToBottom" class="to-bottom">
 			<Button
 				variant="signal"
@@ -113,7 +132,9 @@ import type { ChatMessageId, Reaction } from "ott-common/models/reactions";
 import type { ChatMessage } from "ott-common/models/types";
 import { useGrants } from "@/components/composables/grants";
 import { useRoomKeyboardShortcuts } from "@/util/keyboard-shortcuts";
+import { useChatReactionMenu } from "@/components/composables/chat-reaction-menu";
 import ChatMsg from "./ChatMsg.vue";
+import ChatReactionMenu from "./ChatReactionMenu.vue";
 import {
 	applyChatReactions,
 	chatMessagePast,
@@ -146,8 +167,6 @@ const granted = useGrants();
 
 const inputValue = ref("");
 const stickToBottom = ref(true);
-/** The message whose row of emoji is showing. */
-const pickerFor = ref<ChatMessageId | null>(null);
 let lastScrollTop = 0;
 /**
  * When chat is activated, all messages are shown. and the
@@ -158,10 +177,13 @@ let lastScrollTop = 0;
 const activated = ref(false);
 const isActive = computed(() => activated.value || props.alwaysVisible);
 const deactivateOnBlur = ref(false);
+const root = ref<HTMLElement>();
 const messages = ref();
+const menuElement = ref<InstanceType<typeof ChatReactionMenu>>();
+const menu = useChatReactionMenu(root, messages);
 watch(isActive, active => {
 	if (!active) {
-		pickerFor.value = null;
+		menu.close();
 	}
 });
 const chatInput: Ref<{ $el?: HTMLInputElement } | HTMLInputElement | undefined> = ref();
@@ -182,7 +204,6 @@ const shortcuts = useRoomKeyboardShortcuts();
 onMounted(() => {
 	connection.addMessageHandler("chat", onChatReceived);
 	connection.addMessageHandler("chat-reactions", onChatReactions);
-	window.addEventListener("pointerdown", onPointerDownAnywhere);
 	window.visualViewport?.addEventListener("resize", onViewportResize);
 	if (shortcuts) {
 		shortcuts.bind({ code: "KeyT" }, () => setActivated(true, false));
@@ -194,7 +215,6 @@ onMounted(() => {
 onUnmounted(() => {
 	connection.removeMessageHandler("chat", onChatReceived);
 	connection.removeMessageHandler("chat-reactions", onChatReactions);
-	window.removeEventListener("pointerdown", onPointerDownAnywhere);
 	window.visualViewport?.removeEventListener("resize", onViewportResize);
 	chatOpen.value = false;
 });
@@ -264,8 +284,8 @@ function onChatReceived(msg: ServerMessageChat): void {
 
 function onChatReactions(msg: ServerMessageChatReactions): void {
 	applyChatReactions(msg);
-	if (pickerFor.value !== null && chatReactionsClosed.value.has(pickerFor.value)) {
-		pickerFor.value = null;
+	if (menu.openFor.value !== null && chatReactionsClosed.value.has(menu.openFor.value)) {
+		menu.close();
 	}
 	nextTick(enforceStickToBottom);
 }
@@ -285,26 +305,74 @@ function canReactTo(msg: ChatMessage): boolean {
 }
 
 function isPicking(msg: ChatMessage): boolean {
-	return msg.id !== undefined && msg.id === pickerFor.value && canReactTo(msg);
+	return msg.id !== undefined && msg.id === menu.openFor.value && canReactTo(msg);
 }
 
-async function togglePicker(msg: ChatMessage) {
-	pickerFor.value = isPicking(msg) ? null : msg.id ?? null;
-	await nextTick();
-	revealPicker();
-}
+const menuMessage = computed(() =>
+	[...chatMessageRecent.value, ...chatMessagePast.value].find(isPicking),
+);
 
-/** The chat can be short enough that opening the row would leave it below the fold. */
-function revealPicker() {
-	const list = messages.value as HTMLDivElement | undefined;
-	const row = list?.querySelector<HTMLElement>("[data-cy='chat-reaction-picker']");
-	// A phone's typing view takes the row out of the list and lays it over the video.
-	if (!list || !row || getComputedStyle(row).position === "absolute") {
-		return;
+function onMessageTap(msg: ChatMessage) {
+	if (msg.id !== undefined && canReactTo(msg)) {
+		menu.tapped(msg.id);
 	}
-	const overflow = row.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom;
-	if (overflow > 0) {
-		list.scrollTop += overflow;
+}
+
+async function onMessageKey(msg: ChatMessage) {
+	if (msg.id !== undefined && canReactTo(msg)) {
+		menu.keyPressed(msg.id);
+		await nextTick();
+		menuElement.value?.focusFirst();
+	}
+}
+
+function onMessageMouseEnter(msg: ChatMessage) {
+	if (msg.id !== undefined && canReactTo(msg)) {
+		menu.mouseEnteredMessage(msg.id);
+	}
+}
+
+function onMessageMouseLeave(msg: ChatMessage) {
+	if (msg.id !== undefined) {
+		menu.mouseLeftMessage(msg.id);
+	}
+}
+
+function onMenuPointer(e: PointerEvent, handler: () => void) {
+	if (e.pointerType === "mouse") {
+		handler();
+	}
+}
+
+/** Tabbing out of a menu the keyboard opened shuts it, as the mouse moving away would. */
+function onMenuFocusOut(e: FocusEvent) {
+	const staysInMenu =
+		e.relatedTarget instanceof Element &&
+		e.relatedTarget.closest("[data-cy='chat-reaction-picker']");
+	if (menu.openedBy.value === "keyboard" && !staysInMenu) {
+		menu.close();
+	}
+}
+
+function focusMessage(id: ChatMessageId) {
+	const list = messages.value as HTMLDivElement | undefined;
+	const elements = list?.querySelectorAll<HTMLElement>("[data-chat-message]") ?? [];
+	Array.from(elements)
+		.find(el => el.dataset.messageId === id)
+		?.focus();
+}
+
+function onMenuChoose(emoji: Reaction, add: boolean) {
+	if (menuMessage.value) {
+		setReaction(menuMessage.value, emoji, add);
+	}
+}
+
+function onMenuEscape() {
+	const id = menu.openFor.value;
+	menu.dismiss();
+	if (id !== null) {
+		focusMessage(id);
 	}
 }
 
@@ -313,19 +381,13 @@ function setReaction(msg: ChatMessage, emoji: Reaction, add: boolean) {
 		return;
 	}
 	roomapi.reactToChat(msg.id, emoji, add);
-	pickerFor.value = null;
+	const byKeyboard = menu.openedBy.value === "keyboard";
+	menu.dismiss();
 	// With a mouse, the click moved focus off the input, and typing should carry on regardless.
 	if (!isTouch && activated.value) {
 		focusChatInput();
-	}
-}
-
-function onPointerDownAnywhere(e: PointerEvent) {
-	if (
-		pickerFor.value !== null &&
-		!(e.target instanceof Element && e.target.closest("[data-chat-message]"))
-	) {
-		pickerFor.value = null;
+	} else if (byKeyboard) {
+		focusMessage(msg.id);
 	}
 }
 
@@ -372,11 +434,17 @@ function onInputKeyDown(e: KeyboardEvent): void {
 	}
 }
 
+function onMessageEntered() {
+	enforceStickToBottom();
+	menu.reposition();
+}
+
 function onScroll() {
 	const div = messages.value as HTMLDivElement;
 	if (!div) {
 		return;
 	}
+	menu.reposition();
 	const distToBottom = div.scrollHeight - div.clientHeight - div.scrollTop;
 	/*
 	 * Only the reader scrolling up stops the chat following. A message animating in and a phone's
@@ -395,7 +463,10 @@ function forceToBottom() {
 	enforceStickToBottom();
 }
 
-onUpdated(enforceStickToBottom);
+onUpdated(() => {
+	enforceStickToBottom();
+	menu.reposition();
+});
 </script>
 
 <style lang="scss" scoped>
@@ -409,6 +480,7 @@ onUpdated(enforceStickToBottom);
 	height: 100%;
 
 	&.activated {
+		position: relative;
 		background: color-mix(in srgb, var(--background) 82%, transparent);
 		backdrop-filter: blur(6px);
 		border: 1px solid var(--line-strong);

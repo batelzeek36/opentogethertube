@@ -6,12 +6,15 @@
 			picking,
 		}"
 		data-chat-message
+		:data-message-id="msg.id"
 		:role="reactable ? 'group' : undefined"
 		:tabindex="reactable ? 0 : undefined"
 		:aria-label="reactable ? $t('chat.message-reactable') : undefined"
 		@click="onClick"
-		@keydown.enter.self.prevent.stop="emit('toggle-picker')"
-		@keydown.space.self.prevent.stop="emit('toggle-picker')"
+		@keydown.enter.self.prevent.stop="emit('menu-key')"
+		@keydown.space.self.prevent.stop="emit('menu-key')"
+		@pointerenter="onPointerHover($event, 'mouse-enter')"
+		@pointerleave="onPointerHover($event, 'mouse-leave')"
 	>
 		<div class="from" @click.stop="onClick">{{ msg.from.name }}</div>
 		<div class="text" @click.stop="onClick">
@@ -46,34 +49,13 @@
 				>{{ chip.emoji }} <span class="count">{{ $n(chip.count) }}</span></component
 			>
 		</div>
-		<div
-			v-if="picking"
-			class="chat-reaction-picker"
-			role="group"
-			:aria-label="$t('room.reactions')"
-			data-cy="chat-reaction-picker"
-			@click.stop
-		>
-			<button
-				v-for="emoji in REACTIONS"
-				:key="emoji"
-				type="button"
-				class="pick"
-				:aria-label="$t('room.react', { emoji })"
-				:aria-pressed="isMine(emoji)"
-				:data-cy="`chat-react-${emoji}`"
-				@click="emit('set-reaction', emoji, !isMine(emoji))"
-			>
-				{{ emoji }}
-			</button>
-		</div>
 	</div>
 </template>
 
 <script lang="ts" setup>
 import ProcessedText from "@/components/ProcessedText.vue";
 import type { ChatMessage } from "ott-common";
-import { type ChatReactionCount, REACTIONS, type Reaction } from "ott-common/models/reactions";
+import type { ChatReactionCount, Reaction } from "ott-common/models/reactions";
 
 const props = defineProps<{
 	msg: ChatMessage;
@@ -81,18 +63,28 @@ const props = defineProps<{
 	reactions?: ChatReactionCount[];
 	/** The chat is open and this message can take reactions. Otherwise chips are only to look at. */
 	reactable?: boolean;
-	/** The row of emoji is showing under this message. */
+	/** The reaction menu is sitting on this message. */
 	picking?: boolean;
 }>();
 
 const emit = defineEmits<{
 	"link-click": [e: string];
-	"toggle-picker": [];
+	"menu-tap": [];
+	"menu-key": [];
+	"mouse-enter": [];
+	"mouse-leave": [];
 	"set-reaction": [emoji: Reaction, add: boolean];
 }>();
 
-function isMine(emoji: Reaction): boolean {
-	return props.reactions?.some(chip => chip.emoji === emoji && chip.mine) ?? false;
+/** A finger reports enter and leave around every tap. Only a mouse hovers. */
+function onPointerHover(e: PointerEvent, event: "mouse-enter" | "mouse-leave") {
+	if (props.reactable && e.pointerType === "mouse") {
+		if (event === "mouse-enter") {
+			emit("mouse-enter");
+		} else {
+			emit("mouse-leave");
+		}
+	}
 }
 
 /**
@@ -109,7 +101,7 @@ function onClick(e: MouseEvent) {
 	if (onLink || window.getSelection()?.toString()) {
 		return;
 	}
-	emit("toggle-picker");
+	emit("menu-tap");
 }
 </script>
 
@@ -144,7 +136,6 @@ function onClick(e: MouseEvent) {
 	}
 
 	&.picking {
-		align-self: stretch;
 		// The open chat makes recent messages transparent, and this one is being pointed at.
 		background: color-mix(in srgb, var(--surface-2) 60%, transparent) !important;
 	}
@@ -225,51 +216,6 @@ button.chip {
 	&:focus-visible {
 		outline: 2px solid var(--primary);
 		outline-offset: 1px;
-	}
-}
-
-.chat-reaction-picker {
-	display: flex;
-	margin-top: 4px;
-	max-width: 100%;
-	border-radius: 999px;
-	background: rgb(0 0 0 / 55%);
-	overflow-x: auto;
-	scrollbar-width: none;
-
-	@media (pointer: fine) {
-		flex-wrap: wrap;
-	}
-}
-
-.pick {
-	flex: none;
-	width: 44px;
-	height: 44px;
-	border-radius: 999px;
-	font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-	font-size: 20px;
-	line-height: 1;
-	cursor: pointer;
-	touch-action: manipulation;
-	transition: transform 120ms ease-out, background-color 120ms ease-out;
-
-	&:hover,
-	&[aria-pressed="true"] {
-		background: rgb(255 255 255 / 15%);
-	}
-
-	&:active {
-		transform: scale(0.85);
-	}
-
-	&:focus-visible {
-		outline: 2px solid white;
-		outline-offset: -2px;
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		transition: none;
 	}
 }
 </style>

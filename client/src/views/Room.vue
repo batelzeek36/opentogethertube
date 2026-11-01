@@ -1073,24 +1073,10 @@ export default defineComponent({
 	padding-right: 34px;
 }
 
-/* The chat here is too small to hold this row, so it sits on the movie frame next to the chat. */
-.typing-view .chat .chat-reaction-picker {
-	position: absolute;
-	z-index: 2;
-	width: max-content;
-}
-
 @media (orientation: portrait) {
 	.typing-view > div:first-child {
 		display: flex;
 		flex-direction: column;
-	}
-
-	.typing-view .chat .chat-reaction-picker {
-		left: 50%;
-		bottom: 100%;
-		margin: 0 0 4px;
-		transform: translateX(-50%);
 	}
 }
 
@@ -1124,12 +1110,6 @@ export default defineComponent({
 
 	.typing-view .chat-header {
 		top: 2px;
-	}
-
-	.typing-view .chat .chat-reaction-picker {
-		right: 100%;
-		bottom: 4px;
-		margin: 0 4px 0 0;
 	}
 }
 
