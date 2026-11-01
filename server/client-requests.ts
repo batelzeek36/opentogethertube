@@ -1,4 +1,5 @@
 import { RoomRequestType } from "ott-common/models/messages.js";
+import { PlayerStatus } from "ott-common/models/types.js";
 
 /**
  * Which room requests a client may send over its socket. Joining, leaving and updating a user say
@@ -50,4 +51,14 @@ export function isClientSendableRequest(request: unknown): boolean {
 	}
 	const { type } = request as { type?: unknown };
 	return typeof type === "number" && Boolean(SENDABLE_BY_CLIENTS[type as RoomRequestType]);
+}
+
+const PLAYER_STATUSES: readonly unknown[] = Object.values(PlayerStatus);
+
+/**
+ * Whether a client's status message says something real. A status goes to everyone in the room, so
+ * anything else would be put in front of them.
+ */
+export function isPlayerStatus(status: unknown): status is PlayerStatus {
+	return PLAYER_STATUSES.includes(status);
 }

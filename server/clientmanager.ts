@@ -27,7 +27,7 @@ import tokens, { type SessionInfo } from "./auth/tokens.js";
 import { Gauge } from "prom-client";
 import { replacer } from "ott-common/serialize.js";
 import { type Client, ClientJoinStatus, DirectClient, BalancerClient } from "./client.js";
-import { isClientSendableRequest } from "./client-requests.js";
+import { isClientSendableRequest, isPlayerStatus } from "./client-requests.js";
 import {
 	type BalancerConnection,
 	type MsgB2M,
@@ -215,6 +215,10 @@ async function onClientMessage(client: Client, msg: ClientMessage) {
 			client.kick(msg.reason ?? OttWebsocketError.UNKNOWN);
 			return;
 		} else if (msg.action === "status") {
+			if (!isPlayerStatus(msg.status)) {
+				log.debug(`Ignoring an unknown player status from client ${client.id}`);
+				return;
+			}
 			const request: RoomRequest = {
 				type: RoomRequestType.UpdateUser,
 				info: {

@@ -11,7 +11,7 @@ import { UnloadReason } from "../../generated.js";
 import type { Room } from "../../room.js";
 import type { User } from "../../models/user.js";
 import { RoomRequestType } from "ott-common/models/messages.js";
-import { Role } from "ott-common/models/types.js";
+import { PlayerStatus, Role } from "ott-common/models/types.js";
 
 const OWNER_ID = 101;
 
@@ -170,6 +170,38 @@ describe("room requests sent by clients", () => {
 			viewer.sendRequest("nonsense");
 			await settle();
 			expect(kick).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("the status message", () => {
+		const status = (client: Client) => room.getUser(client.id)?.playerStatus;
+
+		async function startReady() {
+			viewer.sendMessage({ action: "status", status: PlayerStatus.ready });
+			await vi.waitFor(() => expect(status(viewer)).toEqual(PlayerStatus.ready));
+		}
+
+		it.each([
+			["a word that is not a status", "dancing"],
+			["markup", "<img src=x onerror=alert(1)>"],
+			["a name on Object", "constructor"],
+			["a number", 5],
+			["an object", { status: PlayerStatus.buffering }],
+			["an array", [PlayerStatus.buffering]],
+			["null", null],
+			["nothing", undefined],
+		])("drops %s", async (_label, value) => {
+			await startReady();
+			const publish = vi.spyOn(room, "publish");
+			viewer.sendMessage({ action: "status", status: value });
+			await settle();
+			expect(status(viewer)).toEqual(PlayerStatus.ready);
+			expect(publish).not.toHaveBeenCalled();
+		});
+
+		it.each(Object.values(PlayerStatus))("takes %s", async value => {
+			viewer.sendMessage({ action: "status", status: value });
+			await vi.waitFor(() => expect(status(viewer)).toEqual(value));
 		});
 	});
 
