@@ -71,9 +71,11 @@ export class DriftCorrector {
 		return { seek: false, rate: roomSpeed * (1 + this.direction * ADJUST_RATE) };
 	}
 
-	private shouldSeek({ settled, now }: DriftInput): boolean {
+	private shouldSeek({ settled, now, roomPlaying }: DriftInput): boolean {
+		// A paused room's position only changes when someone moves it, and that happens once: held
+		// back here, the move would never be tried again. A playing room asks again every tick.
 		const wait = settled ? SEEK_MIN_INTERVAL_MS : SEEK_SETTLE_MS;
-		if (now - this.lastSeekAt < wait) {
+		if (roomPlaying && now - this.lastSeekAt < wait) {
 			return false;
 		}
 		this.lastSeekAt = now;

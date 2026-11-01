@@ -136,6 +136,13 @@ describe("DriftCorrector", () => {
 			expect(corrector.step(input({ drift: 10, roomPlaying: false })).seek).toBe(true);
 		});
 
+		it("never holds back a move in a paused room, which is only asked for once", () => {
+			const paused = { drift: 5, roomPlaying: false };
+			expect(corrector.step(input({ ...paused, now: 0 })).seek).toBe(true);
+			expect(corrector.step(input({ ...paused, now: 10 })).seek).toBe(true);
+			expect(corrector.step(input({ ...paused, settled: false, now: 20 })).seek).toBe(true);
+		});
+
 		it("gives a seek time to land instead of seeking again every tick", () => {
 			expect(corrector.step(input({ drift: 3, settled: false, now: 0 })).seek).toBe(true);
 			for (let now = TICK_MS; now < SEEK_SETTLE_MS; now += TICK_MS) {
