@@ -1,5 +1,6 @@
 import { getLogger } from "../logger.js";
 import express from "express";
+import _ from "lodash";
 import { rateLimiter } from "../rate-limit.js";
 import roommanager from "../roommanager.js";
 import storage from "../storage.js";
@@ -13,6 +14,7 @@ import clientmanager from "../clientmanager.js";
 
 const router = express.Router();
 const log = getLogger("api/dev");
+const MAX_FAKE_PREV_QUEUE = 1000;
 
 router.post("/reset-rate-limit", async (req, res) => {
 	await rateLimiter.delete(req.ip);
@@ -85,7 +87,7 @@ router.post("/room/:name/seed-prev-queue", async (req, res) => {
 	// Writes a fake previous queue straight to storage so tests can exercise the
 	// restore-queue prompt deterministically. The room must already exist and be
 	// unloaded, so reopening it loads this prevQueue from the database.
-	const count = Number(req.body.count ?? 1);
+	const count = _.clamp(Number(req.body.count) || 1, 1, MAX_FAKE_PREV_QUEUE);
 	const prevQueue = Array.from({ length: count }, (_, i) => ({
 		service: "direct" as const,
 		id: `fake-video-${i}`,
