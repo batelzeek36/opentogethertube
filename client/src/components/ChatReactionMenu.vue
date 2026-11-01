@@ -2,6 +2,7 @@
 	<div
 		ref="menu"
 		class="chat-reaction-picker"
+		:class="{ stacked: placement.columns < REACTIONS.length }"
 		role="toolbar"
 		:aria-label="$t('room.reactions')"
 		data-cy="chat-reaction-picker"
@@ -15,10 +16,11 @@
 		@keydown="onKeyDown"
 	>
 		<button
-			v-for="emoji in REACTIONS"
+			v-for="(emoji, index) in REACTIONS"
 			:key="emoji"
 			type="button"
 			class="pick"
+			:class="{ 'top-row': index < placement.columns }"
 			:aria-label="$t('room.react', { emoji })"
 			:aria-pressed="isMine(emoji)"
 			:data-cy="`chat-react-${emoji}`"
@@ -147,6 +149,15 @@ defineExpose({ focusFirst });
 			content: "";
 			position: absolute;
 			inset: calc((var(--row) - 44px) / 2) 0;
+		}
+
+		// Two rows share an edge, so each grows away from the other and no tap lands on a neighbour.
+		.stacked &.top-row::after {
+			inset: calc(var(--row) - 44px) 0 0;
+		}
+
+		.stacked &:not(.top-row)::after {
+			inset: 0 0 calc(var(--row) - 44px);
 		}
 	}
 }

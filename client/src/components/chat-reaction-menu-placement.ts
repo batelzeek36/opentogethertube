@@ -14,7 +14,7 @@ export interface MenuSizing {
 	rowHeight: number;
 }
 
-export const TOUCH_SIZING: MenuSizing = { maxSlot: 44, minSlot: 32, rowHeight: 32 };
+export const TOUCH_SIZING: MenuSizing = { maxSlot: 40, minSlot: 32, rowHeight: 28 };
 export const MOUSE_SIZING: MenuSizing = { maxSlot: 30, minSlot: 26, rowHeight: 28 };
 
 /** The menu's border and padding, both sides together. */

@@ -39,12 +39,12 @@ function inside(placement: ReturnType<typeof placeReactionMenu>, outer: MenuBox)
 }
 
 describe("placeReactionMenu", () => {
-	it("gives a finger eight 44px buttons in the 58px list at 390 wide", () => {
+	it("gives a finger eight 40px buttons in the 58px list at 390 wide", () => {
 		const placement = placeReactionMenu(8, TOUCH_SIZING, {
 			...phone,
 			message: box(5, 302, 200, 46),
 		});
-		expect(placement).toMatchObject({ slot: 44, columns: 8 });
+		expect(placement).toMatchObject({ slot: 40, columns: 8 });
 		expect(inside(placement, phone.list)).toBe(true);
 	});
 
@@ -59,14 +59,14 @@ describe("placeReactionMenu", () => {
 	});
 
 	it("narrows the buttons before breaking the row in a sideways phone's column", () => {
-		const list = box(490, 40, 348, 300);
+		const list = box(490, 40, 300, 300);
 		const placement = placeReactionMenu(8, TOUCH_SIZING, {
 			message: box(492, 200, 180, 30),
 			list,
-			chat: box(487, 0, 354, 390),
-			viewport: box(0, 0, 844, 390),
+			chat: box(487, 0, 306, 390),
+			viewport: box(0, 0, 800, 390),
 		});
-		expect(placement).toMatchObject({ slot: 42, columns: 8 });
+		expect(placement).toMatchObject({ slot: 36, columns: 8 });
 		expect(inside(placement, list)).toBe(true);
 	});
 
@@ -78,8 +78,12 @@ describe("placeReactionMenu", () => {
 			chat: box(326, 0, 240, 320),
 			viewport: box(0, 0, 568, 320),
 		});
-		expect(placement).toMatchObject({ slot: 44, columns: 4 });
+		expect(placement).toMatchObject({ slot: 40, columns: 4 });
 		expect(inside(placement, list)).toBe(true);
+	});
+
+	it("keeps a finger's row as short as a mouse's, so the menu looks the same size", () => {
+		expect(TOUCH_SIZING.rowHeight).toBe(MOUSE_SIZING.rowHeight);
 	});
 
 	it("sits on the top edge of a message with room above it", () => {
