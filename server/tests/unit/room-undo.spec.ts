@@ -10,7 +10,11 @@ import { loadConfigFile } from "../../ott-config.js";
 import { UnloadReason } from "../../generated.js";
 import type { Room } from "../../room.js";
 import { MAX_UNDOABLE_EVENTS, UNDO_WINDOW_MS } from "../../room-undo.js";
-import { RoomRequestType, type ServerMessageEvent } from "ott-common/models/messages.js";
+import {
+	type RoomRequest,
+	RoomRequestType,
+	type ServerMessageEvent,
+} from "ott-common/models/messages.js";
 import { Role } from "ott-common/models/types.js";
 import type { Video } from "ott-common/models/video.js";
 import permissions from "ott-common/permissions.js";
@@ -57,8 +61,16 @@ describe("undoing a room event", () => {
 		viewer.sendRequest({ type: RoomRequestType.UndoRequest, eventId });
 		await settle();
 	};
-	const act = async (request: unknown) => {
-		viewer.sendRequest(request);
+	const act = async (request: RoomRequest | Record<string, unknown>) => {
+		// These two have REST routes and can't come over a socket, so go the way those routes do.
+		if (
+			request.type === RoomRequestType.AddRequest ||
+			request.type === RoomRequestType.RemoveRequest
+		) {
+			await clientmanager.makeRoomRequest(viewer, request as RoomRequest);
+		} else {
+			viewer.sendRequest(request);
+		}
 		await settle();
 	};
 	const queueIds = () => room.queue.items.map(item => item.id);

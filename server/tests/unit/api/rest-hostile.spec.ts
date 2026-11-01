@@ -47,8 +47,8 @@ const JUNK_BODIES: unknown[] = [
 	{ username: 5 },
 	{ username: ["a"] },
 	{ username: "a".repeat(5000), password: "b" },
-	{ username: "nobody with this name" },
-	{ email: "doesnot@exi.st" },
+	{ username: "hostile spec nobody" },
+	{ email: "hostile-spec-nobody@exi.st" },
 	{ email: {} },
 	{ user: {}, password: {} },
 	{ user: "nobody", password: 5 },
@@ -261,7 +261,10 @@ describe("hostile REST requests", () => {
 			vi.spyOn(tokens, "setSessionInfo").mockRejectedValue(new Error("redis is down"));
 			for (const route of targets()) {
 				for (const path of pathsFor(route).slice(0, 1)) {
-					await hit(route, path, authToken, { username: "another name", password: "x" });
+					await hit(route, path, authToken, {
+						username: "hostile spec another",
+						password: "x",
+					});
 				}
 			}
 			await new Promise(resolve => setTimeout(resolve, 50));

@@ -5,11 +5,11 @@ import { counterHttpErrors } from "./metrics.js";
 
 const log = getLogger("express-safety");
 
-function forwardRejection(result: unknown, next: NextFunction): void {
-	if (typeof (result as PromiseLike<unknown> | undefined)?.then === "function") {
-		(result as PromiseLike<unknown>).then(undefined, err => {
-			next(err ?? new Error("A request handler rejected without saying why"));
-		});
+async function forwardRejection(result: unknown, next: NextFunction): Promise<void> {
+	try {
+		await result;
+	} catch (err) {
+		next(err ?? new Error("A request handler rejected without saying why"));
 	}
 }
 
@@ -29,7 +29,7 @@ export function sendRejectionsToErrorHandlers(): void {
 			return;
 		}
 		try {
-			forwardRejection(fn(req, res, next), next);
+			void forwardRejection(fn(req, res, next), next);
 		} catch (err) {
 			next(err);
 		}
@@ -41,7 +41,7 @@ export function sendRejectionsToErrorHandlers(): void {
 			return;
 		}
 		try {
-			forwardRejection(fn(error, req, res, next), next);
+			void forwardRejection(fn(error, req, res, next), next);
 		} catch (err) {
 			next(err);
 		}

@@ -294,15 +294,8 @@ router.post("/login", async (req, res, next) => {
 					});
 					return;
 				}
-				// Passport ignores what this callback returns, so a rejection has to be passed on by hand.
-				startLoggedInSession(req, user)
-					.then(() => {
-						res.json({
-							success: true,
-							user: _.pick(user, ["email", "username"]),
-						});
-					})
-					.catch(next);
+				// Passport ignores what this callback returns, so this has to catch its own rejections.
+				void finishLogIn(req, res, next, user, 200);
 			});
 		} else {
 			res.status(401).json({
@@ -324,17 +317,7 @@ router.post("/logout", async (req, res, next) => {
 				next(err);
 				return;
 			}
-			const session: SessionInfo = { isLoggedIn: false, username: uniqueNamesGenerator() };
-			req.ottsession = session;
-			tokens
-				.setSessionInfo(req.token!, session)
-				.then(() => {
-					onUserLogOut(user, req.token!);
-					res.json({
-						success: true,
-					});
-				})
-				.catch(next);
+			void finishLogOut(req, res, next, user);
 		});
 	} else {
 		res.status(400).json({
@@ -369,14 +352,7 @@ router.post("/register", async (req, res, next) => {
 				next(loginErr);
 				return;
 			}
-			startLoggedInSession(req, result)
-				.then(() => {
-					res.status(201).json({
-						success: true,
-						user: _.pick(result, ["email", "username"]),
-					});
-				})
-				.catch(next);
+			void finishLogIn(req, res, next, result, 201);
 		});
 	} catch (err) {
 		if (err instanceof Error) {
@@ -781,14 +757,47 @@ async function getUser(options: { user?: string; id?: number; discordId?: string
 	return user;
 }
 
-async function startLoggedInSession(req: express.Request, user: User): Promise<void> {
-	const session: SessionInfo = { isLoggedIn: true, user_id: user.id };
-	req.ottsession = session;
-	await tokens.setSessionInfo(req.token!, session);
+async function finishLogIn(
+	req: express.Request,
+	res: express.Response,
+	next: express.NextFunction,
+	user: User,
+	status: number,
+): Promise<void> {
 	try {
-		onUserLogIn(user, req.token!);
+		const session: SessionInfo = { isLoggedIn: true, user_id: user.id };
+		req.ottsession = session;
+		await tokens.setSessionInfo(req.token!, session);
+		try {
+			onUserLogIn(user, req.token!);
+		} catch (err) {
+			log.error(`An unknown error occurred when running onUserLogIn: ${err} ${err.message}`);
+		}
+		res.status(status).json({
+			success: true,
+			user: _.pick(user, ["email", "username"]),
+		});
 	} catch (err) {
-		log.error(`An unknown error occurred when running onUserLogIn: ${err} ${err.message}`);
+		next(err);
+	}
+}
+
+async function finishLogOut(
+	req: express.Request,
+	res: express.Response,
+	next: express.NextFunction,
+	user: User,
+): Promise<void> {
+	try {
+		const session: SessionInfo = { isLoggedIn: false, username: uniqueNamesGenerator() };
+		req.ottsession = session;
+		await tokens.setSessionInfo(req.token!, session);
+		onUserLogOut(user, req.token!);
+		res.json({
+			success: true,
+		});
+	} catch (err) {
+		next(err);
 	}
 }
 
