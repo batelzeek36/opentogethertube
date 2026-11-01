@@ -2,7 +2,7 @@ import type { OttRoomConnection } from "@/plugins/connection";
 import { type ClientMessageNotify, RoomRequestType } from "ott-common/models/messages";
 import type { ClientId, Role } from "ott-common/models/types";
 import type { VideoId } from "ott-common/models/video";
-import type { Reaction } from "ott-common/models/reactions";
+import type { ChatMessageId, Reaction } from "ott-common/models/reactions";
 
 export function useRoomApi(connection: OttRoomConnection) {
 	return new RoomApi(connection);
@@ -100,6 +100,19 @@ class RoomApi {
 			request: {
 				type: RoomRequestType.ReactionRequest,
 				emoji,
+			},
+		});
+	}
+
+	/** Add or take back this person's reaction on a chat message. */
+	reactToChat(messageId: ChatMessageId, emoji: Reaction, add: boolean) {
+		this.connection.send({
+			action: "req",
+			request: {
+				type: RoomRequestType.ChatReactionRequest,
+				messageId,
+				emoji,
+				add,
 			},
 		});
 	}

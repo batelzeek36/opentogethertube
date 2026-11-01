@@ -2,6 +2,7 @@ import type { Session } from "express-session";
 import type { QueueItem, Video } from "./video.js";
 import type { Grants } from "../permissions.js";
 import type { Category } from "sponsorblock-api";
+import type { ChatMessageId } from "./reactions.js";
 
 export enum Visibility {
 	Public = "public",
@@ -110,6 +111,7 @@ export interface RoomEventContext {
 }
 
 export interface ChatMessage {
+	id?: ChatMessageId;
 	from: RoomUserInfo;
 	text: string;
 }

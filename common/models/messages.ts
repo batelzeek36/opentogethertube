@@ -13,7 +13,7 @@ import type {
 	BehaviorOption,
 } from "./types.js";
 import type { QueueItem, QueueItemExtras, VideoId, VideoAdd } from "./video.js";
-import type { Reaction } from "./reactions.js";
+import type { ChatMessageId, ChatReactionCount, Reaction } from "./reactions.js";
 import type { VoiceChannelId, VoiceYouEvent } from "./voice.js";
 
 export type ServerMessage =
@@ -21,6 +21,7 @@ export type ServerMessage =
 	| ServerMessageUnload
 	| ServerMessageChat
 	| ServerMessageReaction
+	| ServerMessageChatReactions
 	| ServerMessageEvent
 	| ServerMessageEventCustom
 	| ServerMessageAnnouncement
@@ -73,6 +74,8 @@ export interface ServerMessageUnload extends ServerMessageBase {
 
 export interface ServerMessageChat extends ServerMessageBase {
 	action: "chat";
+	/** What reactions refer to. A server from before reactions sends none. */
+	id?: ChatMessageId;
 	from: RoomUserInfo;
 	text: string;
 }
@@ -81,6 +84,17 @@ export interface ServerMessageReaction extends ServerMessageBase {
 	action: "reaction";
 	from: RoomUserInfo;
 	emoji: Reaction;
+}
+
+/** Reactions on chat messages, worded for the one client it is sent to. */
+export interface ServerMessageChatReactions extends ServerMessageBase {
+	action: "chat-reactions";
+	/** The full current reactions of each message listed. */
+	messages: { id: ChatMessageId; reactions: ChatReactionCount[] }[];
+	/** Everything the room remembers, so a message not listed has no reactions. */
+	complete?: boolean;
+	/** Messages the room no longer remembers, which can no longer be reacted to. */
+	closed?: ChatMessageId[];
 }
 
 export interface ServerMessageEvent extends ServerMessageBase {
@@ -239,7 +253,8 @@ export type RoomRequest =
 	| VoiceLeaveRequest
 	| VoiceTalkRequest
 	| VoiceRemoveRequest
-	| VoiceAllowRequest;
+	| VoiceAllowRequest
+	| ChatReactionRequest;
 
 export enum RoomRequestType {
 	JoinRequest,
@@ -268,6 +283,8 @@ export enum RoomRequestType {
 	VoiceTalkRequest,
 	VoiceRemoveRequest,
 	VoiceAllowRequest,
+	// New types go last: open tabs send these numbers, so existing ones can never shift.
+	ChatReactionRequest,
 }
 
 export interface RoomRequestBase {
@@ -349,6 +366,14 @@ export interface ChatRequest extends RoomRequestBase {
 export interface ReactionRequest extends RoomRequestBase {
 	type: RoomRequestType.ReactionRequest;
 	emoji: Reaction;
+}
+
+/** Add or take back this person's reaction on a chat message. */
+export interface ChatReactionRequest extends RoomRequestBase {
+	type: RoomRequestType.ChatReactionRequest;
+	messageId: ChatMessageId;
+	emoji: Reaction;
+	add: boolean;
 }
 
 export interface VoiceJoinRequest extends RoomRequestBase {

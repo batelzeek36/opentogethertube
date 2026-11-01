@@ -18,21 +18,36 @@
 			</Button>
 			<h4 class="label-mono text-primary">{{ $t("chat.title") }}</h4>
 		</div>
-		<div ref="messages" @scroll="onScroll" class="messages grow">
+		<div
+			ref="messages"
+			@scroll="onScroll"
+			@mousedown="onMessagesMouseDown"
+			class="messages grow"
+		>
 			<div class="grow"><!-- Spacer --></div>
 			<transition-group name="message" @after-enter="enforceStickToBottom">
 				<ChatMsg
 					:msg="msg"
+					:reactions="reactionsOf(msg)"
+					:reactable="canReactTo(msg)"
+					:picking="isPicking(msg)"
 					v-for="(msg, index) in chatMessagePast"
 					:key="index"
 					@link-click="emit('link-click', $event)"
+					@toggle-picker="togglePicker(msg)"
+					@set-reaction="(emoji, add) => setReaction(msg, emoji, add)"
 				/>
 				<ChatMsg
 					:msg="msg"
+					:reactions="reactionsOf(msg)"
+					:reactable="canReactTo(msg)"
+					:picking="isPicking(msg)"
 					recent
 					v-for="(msg, index) in chatMessageRecent"
 					:key="chatMessagePast.length + index"
 					@link-click="emit('link-click', $event)"
+					@toggle-picker="togglePicker(msg)"
+					@set-reaction="(emoji, add) => setReaction(msg, emoji, add)"
 				/>
 			</transition-group>
 		</div>
@@ -87,18 +102,31 @@ import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
 import { mdiChevronDown, mdiChevronDoubleDown, mdiCommentOutline } from "@mdi/js";
-import { computed, onUpdated, ref, type Ref, nextTick, onMounted, onUnmounted } from "vue";
+import { computed, onUpdated, ref, type Ref, nextTick, onMounted, onUnmounted, watch } from "vue";
 import { useConnection } from "@/plugins/connection";
 import { useStore } from "@/store";
 import { useRoomApi } from "@/util/roomapi";
-import type { ServerMessageChat } from "ott-common/models/messages";
+import type { ServerMessageChat, ServerMessageChatReactions } from "ott-common/models/messages";
+import type { ChatMessageId, Reaction } from "ott-common/models/reactions";
+import type { ChatMessage } from "ott-common/models/types";
+import { useGrants } from "@/components/composables/grants";
 import { useRoomKeyboardShortcuts } from "@/util/keyboard-shortcuts";
 import ChatMsg from "./ChatMsg.vue";
-import { chatMessagePast, chatMessageRecent, chatOpen, chatUnread } from "./chat-state";
+import {
+	applyChatReactions,
+	chatMessagePast,
+	chatMessageRecent,
+	chatOpen,
+	chatReactions,
+	chatReactionsClosed,
+	chatUnread,
+} from "./chat-state";
 
 const MSG_SHOW_TIMEOUT = 20000;
 const KEYBOARD_MIN_HEIGHT = 100;
 const STICK_DISTANCE_PX = 8;
+/** Same test as the typing view: a finger, and so a phone keyboard that a lost focus would close. */
+const isTouch = window.matchMedia?.("(pointer: coarse)").matches ?? false;
 
 const emit = defineEmits(["link-click"]);
 const props = defineProps({
@@ -112,8 +140,12 @@ const connection = useConnection();
 const store = useStore();
 const roomapi = useRoomApi(connection);
 
+const granted = useGrants();
+
 const inputValue = ref("");
 const stickToBottom = ref(true);
+/** The message whose row of emoji is showing. */
+const pickerFor = ref<ChatMessageId | null>(null);
 let lastScrollTop = 0;
 /**
  * When chat is activated, all messages are shown. and the
@@ -125,6 +157,11 @@ const activated = ref(false);
 const isActive = computed(() => activated.value || props.alwaysVisible);
 const deactivateOnBlur = ref(false);
 const messages = ref();
+watch(isActive, active => {
+	if (!active) {
+		pickerFor.value = null;
+	}
+});
 const chatInput: Ref<{ $el?: HTMLInputElement } | HTMLInputElement | undefined> = ref();
 
 /** Resolve the underlying <input> element whether chatInput holds a component instance or the DOM node. */
@@ -142,6 +179,8 @@ function getChatInputEl(): HTMLInputElement | undefined {
 const shortcuts = useRoomKeyboardShortcuts();
 onMounted(() => {
 	connection.addMessageHandler("chat", onChatReceived);
+	connection.addMessageHandler("chat-reactions", onChatReactions);
+	window.addEventListener("pointerdown", onPointerDownAnywhere);
 	window.visualViewport?.addEventListener("resize", onViewportResize);
 	if (shortcuts) {
 		shortcuts.bind({ code: "KeyT" }, () => setActivated(true, false));
@@ -152,6 +191,8 @@ onMounted(() => {
 
 onUnmounted(() => {
 	connection.removeMessageHandler("chat", onChatReceived);
+	connection.removeMessageHandler("chat-reactions", onChatReactions);
+	window.removeEventListener("pointerdown", onPointerDownAnywhere);
 	window.visualViewport?.removeEventListener("resize", onViewportResize);
 	chatOpen.value = false;
 });
@@ -217,6 +258,84 @@ function onChatReceived(msg: ServerMessageChat): void {
 	}
 	setTimeout(expireChatMessage, MSG_SHOW_TIMEOUT);
 	nextTick(enforceStickToBottom);
+}
+
+function onChatReactions(msg: ServerMessageChatReactions): void {
+	applyChatReactions(msg);
+	if (pickerFor.value !== null && chatReactionsClosed.value.has(pickerFor.value)) {
+		pickerFor.value = null;
+	}
+	nextTick(enforceStickToBottom);
+}
+
+function reactionsOf(msg: ChatMessage) {
+	return msg.id === undefined ? undefined : chatReactions.value.get(msg.id);
+}
+
+/** Only while the chat is open. A message floating over the video is just to be read. */
+function canReactTo(msg: ChatMessage): boolean {
+	return (
+		isActive.value &&
+		msg.id !== undefined &&
+		!chatReactionsClosed.value.has(msg.id) &&
+		granted("chat")
+	);
+}
+
+function isPicking(msg: ChatMessage): boolean {
+	return msg.id !== undefined && msg.id === pickerFor.value && canReactTo(msg);
+}
+
+async function togglePicker(msg: ChatMessage) {
+	pickerFor.value = isPicking(msg) ? null : msg.id ?? null;
+	await nextTick();
+	revealPicker();
+}
+
+/** The chat can be short enough that opening the row would leave it below the fold. */
+function revealPicker() {
+	const list = messages.value as HTMLDivElement | undefined;
+	const row = list?.querySelector<HTMLElement>("[data-cy='chat-reaction-picker']");
+	// A phone's typing view takes the row out of the list and lays it over the video.
+	if (!list || !row || getComputedStyle(row).position === "absolute") {
+		return;
+	}
+	const overflow = row.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom;
+	if (overflow > 0) {
+		list.scrollTop += overflow;
+	}
+}
+
+function setReaction(msg: ChatMessage, emoji: Reaction, add: boolean) {
+	if (msg.id === undefined) {
+		return;
+	}
+	roomapi.reactToChat(msg.id, emoji, add);
+	pickerFor.value = null;
+	// With a mouse, the click moved focus off the input, and typing should carry on regardless.
+	if (!isTouch && activated.value) {
+		focusChatInput();
+	}
+}
+
+function onPointerDownAnywhere(e: PointerEvent) {
+	if (
+		pickerFor.value !== null &&
+		!(e.target instanceof Element && e.target.closest("[data-chat-message]"))
+	) {
+		pickerFor.value = null;
+	}
+}
+
+/**
+ * Tapping a message must not take focus from the input: that would close a phone's keyboard, or
+ * close a chat opened with the keyboard shortcut. A mouse otherwise keeps its usual way of selecting
+ * text in a chat that stays open.
+ */
+function onMessagesMouseDown(e: MouseEvent) {
+	if (isActive.value && (isTouch || deactivateOnBlur.value)) {
+		e.preventDefault();
+	}
 }
 
 function expireChatMessage() {

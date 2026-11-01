@@ -441,6 +441,98 @@ describe("Room", () => {
 			});
 		});
 
+		describe("chat", () => {
+			const context = { username: "test", role: Role.UnregisteredUser, clientId: "user" };
+
+			it("keeps request numbers stable, because open tabs send them", () => {
+				expect(RoomRequestType.VoiceAllowRequest).toEqual(25);
+				expect(RoomRequestType.ChatReactionRequest).toEqual(26);
+			});
+
+			it("gives each chat message an id", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				await room.processRequest(
+					{ type: RoomRequestType.ChatRequest, text: "hi" },
+					context,
+				);
+				await room.processRequest(
+					{ type: RoomRequestType.ChatRequest, text: "hi" },
+					context,
+				);
+				const ids = publish.mock.calls.map(([msg]) => (msg as { id?: string }).id);
+				expect(ids[0]).toEqual(expect.any(String));
+				expect(ids[1]).toEqual(expect.any(String));
+				expect(ids[0]).not.toEqual(ids[1]);
+			});
+
+			it("sends a reaction on a chat message to each client, not to the whole room", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				const command = vi.spyOn(room, "command").mockResolvedValue();
+				await room.processRequest(
+					{ type: RoomRequestType.ChatRequest, text: "hi" },
+					context,
+				);
+				const messageId = (publish.mock.calls[0][0] as { id: string }).id;
+				publish.mockClear();
+				await room.processRequest(
+					{
+						type: RoomRequestType.ChatReactionRequest,
+						messageId,
+						emoji: "🔥",
+						add: true,
+					},
+					context,
+				);
+				expect(publish).not.toHaveBeenCalled();
+				expect(command).toHaveBeenCalledWith({
+					type: "send",
+					clientId: "user",
+					msg: {
+						action: "chat-reactions",
+						messages: [
+							{
+								id: messageId,
+								reactions: [{ emoji: "🔥", count: 1, mine: true }],
+							},
+						],
+					},
+				});
+			});
+
+			it("refuses a reaction from a role without the chat permission", async () => {
+				room.grants.setRoleGrants(Role.UnregisteredUser, 0);
+				await expect(
+					room.processRequest(
+						{
+							type: RoomRequestType.ChatReactionRequest,
+							messageId: "any",
+							emoji: "🔥",
+							add: true,
+						},
+						context,
+					),
+				).rejects.toThrow();
+			});
+
+			it("catches a joining client up on reactions", async () => {
+				const command = vi.spyOn(room, "command").mockResolvedValue();
+				await room.processRequest(
+					{ type: RoomRequestType.JoinRequest, info: { id: "late", username: "late" } },
+					{
+						username: "late",
+						role: Role.UnregisteredUser,
+						clientId: "late",
+						auth: { token: "late-token" as AuthToken, clientId: "late" },
+					},
+				);
+				expect(command).toHaveBeenCalledWith({
+					type: "send",
+					clientId: "late",
+					msg: { action: "chat-reactions", complete: true, messages: [] },
+				});
+			});
+		});
+
 		describe("voice", () => {
 			const owner = { id: 1, username: "owner" } as never;
 			const memberContext = {

@@ -1,4 +1,6 @@
 import { ref, type Ref } from "vue";
+import type { ServerMessageChatReactions } from "ott-common/models/messages";
+import type { ChatMessageId, ChatReactionCount } from "ott-common/models/reactions";
 import type { ChatMessage } from "ott-common/models/types";
 
 /*
@@ -23,3 +25,25 @@ export const chatOpen: Ref<boolean> = ref(false);
 
 /** Messages from other people that arrived while the chat was closed. */
 export const chatUnread: Ref<number> = ref(0);
+
+/** The chips under each chat message. Empty for a message nobody has reacted to. */
+export const chatReactions: Ref<Map<ChatMessageId, ChatReactionCount[]>> = ref(new Map());
+
+/** Messages the room no longer remembers, which can no longer be reacted to. */
+export const chatReactionsClosed: Ref<Set<ChatMessageId>> = ref(new Set());
+
+export function applyChatReactions(msg: ServerMessageChatReactions): void {
+	if (msg.complete) {
+		chatReactions.value.clear();
+	}
+	for (const { id, reactions } of msg.messages) {
+		if (reactions.length > 0) {
+			chatReactions.value.set(id, reactions);
+		} else {
+			chatReactions.value.delete(id);
+		}
+	}
+	for (const id of msg.closed ?? []) {
+		chatReactionsClosed.value.add(id);
+	}
+}

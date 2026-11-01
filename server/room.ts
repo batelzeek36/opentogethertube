@@ -3,12 +3,14 @@ import { isReaction } from "ott-common/models/reactions.js";
 import { VOICE_RULE_DEFAULTS } from "ott-common/models/voice.js";
 import { VoiceRulesSchema } from "ott-common/models/zod-schemas.js";
 import { VoiceChannels } from "./voice.js";
+import { ChatReactions } from "./chat-reactions.js";
 import { redisClient } from "./redisclient.js";
 import { getLogger } from "./logger.js";
 import type winston from "winston";
 import type {
 	AddRequest,
 	ApplySettingsRequest,
+	ChatReactionRequest,
 	ChatRequest,
 	ReactionRequest,
 	VoiceAllowRequest,
@@ -268,11 +270,14 @@ export class Room implements RoomState {
 		}),
 		publish: msg => void this.publish(msg),
 		sendTo: (clientId, msg) => void this.command({ type: "send", clientId, msg }),
-		personKey: clientId => {
-			const user = this.getUser(clientId);
-			return user && (user.user_id ? `user:${user.user_id}` : `token:${user.token}`);
-		},
+		personKey: clientId => this.personKey(clientId),
 		clientIds: () => this.realusers.map(user => user.id),
+	});
+	/** Reactions on chat messages. Held in memory only, see ChatReactions. */
+	chatReactions = new ChatReactions({
+		personKey: clientId => this.personKey(clientId),
+		clientIds: () => this.realusers.map(user => user.id),
+		sendTo: (clientId, msg) => void this.command({ type: "send", clientId, msg }),
 	});
 
 	_currentSource: QueueItem | null = null;
@@ -723,6 +728,12 @@ export class Room implements RoomState {
 		}
 	}
 
+	/** Identifies a person across reconnects: their account, or their browser's token. */
+	private personKey(clientId: ClientId): string | undefined {
+		const user = this.getUser(clientId);
+		return user && (user.user_id ? `user:${user.user_id}` : `token:${user.token}`);
+	}
+
 	getUser(client: ClientId): RoomUser | undefined {
 		for (const user of this.realusers) {
 			if (user.id === client) {
@@ -1145,6 +1156,7 @@ export class Room implements RoomState {
 			[RoomRequestType.VoteRequest, "manage-queue.vote"],
 			[RoomRequestType.ChatRequest, "chat"],
 			[RoomRequestType.ReactionRequest, "chat"],
+			[RoomRequestType.ChatReactionRequest, "chat"],
 			[RoomRequestType.PlayNowRequest, "manage-queue.play-now"],
 			[RoomRequestType.ShuffleRequest, "manage-queue.order"],
 			[RoomRequestType.PlaybackSpeedRequest, "playback.speed"],
@@ -1180,6 +1192,7 @@ export class Room implements RoomState {
 			[RoomRequestType.UpdateUser]: "updateUser",
 			[RoomRequestType.ChatRequest]: "chat",
 			[RoomRequestType.ReactionRequest]: "react",
+			[RoomRequestType.ChatReactionRequest]: "reactToChat",
 			[RoomRequestType.UndoRequest]: "undo",
 			[RoomRequestType.ApplySettingsRequest]: "applySettings",
 			[RoomRequestType.PlayNowRequest]: "playNow",
@@ -1432,6 +1445,7 @@ export class Room implements RoomState {
 		await this.publish({ action: "sync", playbackPosition: this.realPlaybackPosition });
 		await this.syncUser(this.getUserInfo(user.id));
 		this.voice.publishState();
+		this.chatReactions.sendAllTo(user.id);
 	}
 
 	public async leaveRoom(request: LeaveRequest, context: RoomRequestContext): Promise<void> {
@@ -1440,6 +1454,7 @@ export class Room implements RoomState {
 		}
 		const removed = this.getUserInfo(context.clientId);
 		this.lastReactionAt.delete(context.clientId);
+		this.chatReactions.forgetClient(context.clientId);
 		this.voice.leave(context.clientId);
 		// We must publish the event before removing the user, otherwise publishing the event will fail because the user is gone.
 		await this.publishRoomEvent(request, context, { user: removed });
@@ -1484,9 +1499,19 @@ export class Room implements RoomState {
 		const user = this.getUserInfo(context.clientId);
 		await this.publish({
 			action: "chat",
+			id: this.chatReactions.addMessage(),
 			from: user,
 			text: request.text,
 		});
+	}
+
+	public async reactToChat(
+		request: ChatReactionRequest,
+		context: RoomRequestContext,
+	): Promise<void> {
+		if (context.clientId !== undefined) {
+			this.chatReactions.setReaction(context.clientId, request);
+		}
 	}
 
 	public async react(request: ReactionRequest, context: RoomRequestContext): Promise<void> {
