@@ -34,6 +34,11 @@ export type ClientEventHandlers<E> = E extends "auth"
  */
 const MAX_BUFFERED_BYTES_FOR_BINARY = 32 * 1024;
 
+/** Parsed JSON can be anything, and only an object can be a message. */
+function isMessageShaped(msg: unknown): msg is ClientMessage {
+	return typeof msg === "object" && msg !== null;
+}
+
 export enum ClientJoinStatus {
 	WaitingForAuth,
 	Joined,
@@ -50,6 +55,8 @@ export abstract class Client {
 	joinStatus: ClientJoinStatus = ClientJoinStatus.WaitingForAuth;
 
 	private bus: EventEmitter;
+	/** Set before the first await in auth, so two messages sent together can't both get through. */
+	private authStarted = false;
 
 	constructor(room: string) {
 		this.id = uuidv4();
@@ -77,7 +84,16 @@ export abstract class Client {
 		await setSessionInfo(this.token, this.session);
 	}
 
+	/**
+	 * Say who this client is. This happens once per connection. Another would join the room again,
+	 * which duplicates the user and everything sent to them, and would change who they are.
+	 */
 	public async auth(token: AuthToken): Promise<void> {
+		if (this.authStarted) {
+			log.warn(`Client ${this.id} tried to authenticate again, ignoring`);
+			return;
+		}
+		this.authStarted = true;
 		if (!token) {
 			log.warn("Client sent empty auth token, kicking");
 			this.kick(OttWebsocketError.MISSING_TOKEN);
@@ -152,18 +168,31 @@ export class DirectClient extends Client {
 			}
 			return;
 		}
-		let msg: ClientMessage;
+		let msg: unknown;
 		try {
 			msg = JSON.parse(data);
 		} catch {
 			log.warn(`Dropping a message that is not valid JSON from client ${this.id}`);
 			return;
 		}
+		if (!isMessageShaped(msg)) {
+			log.warn(`Dropping a message that is not an object from client ${this.id}`);
+			return;
+		}
 		if (msg.action === "auth") {
-			this.auth(msg.token);
+			void this.authFromSocket(msg.token);
 			return;
 		}
 		this.emit("message", this, msg);
+	}
+
+	/** Nothing waits for a socket's listeners, so a failure has to stop here. */
+	private async authFromSocket(token: AuthToken): Promise<void> {
+		try {
+			await this.auth(token);
+		} catch (err) {
+			log.error(`Failed to authenticate client ${this.id}: ${err}`);
+		}
 	}
 
 	onPing() {
@@ -219,6 +248,10 @@ export class BalancerClient extends Client {
 	}
 
 	receiveMessage(msg: ClientMessage) {
+		if (!isMessageShaped(msg)) {
+			log.warn(`Dropping a message that is not an object from client ${this.id}`);
+			return;
+		}
 		this.emit("message", this, msg);
 	}
 

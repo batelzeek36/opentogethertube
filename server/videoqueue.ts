@@ -100,10 +100,10 @@ export class VideoQueue extends Dirtyable {
 		if (fromIdx === toIdx) {
 			return;
 		}
-		if (fromIdx < 0 || fromIdx >= this._items.length) {
+		if (!Number.isInteger(fromIdx) || fromIdx < 0 || fromIdx >= this._items.length) {
 			throw new Error("'fromIdx' out of bounds");
 		}
-		if (toIdx < 0 || toIdx >= this._items.length) {
+		if (!Number.isInteger(toIdx) || toIdx < 0 || toIdx >= this._items.length) {
 			throw new Error("'toIdx' out of bounds");
 		}
 		return this.lock.protect(() => {

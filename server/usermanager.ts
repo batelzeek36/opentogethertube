@@ -9,7 +9,7 @@ import type { User } from "./models/user.js";
 import { delPattern, redisClient } from "./redisclient.js";
 import { type RateLimiterAbstract, RateLimiterMemory } from "rate-limiter-flexible";
 import { RateLimiterRedisv4, consumeRateLimitPoints, rateLimiter } from "./rate-limit.js";
-import tokens from "./auth/tokens.js";
+import tokens, { type SessionInfo } from "./auth/tokens.js";
 import nocache from "nocache";
 import { uniqueNamesGenerator } from "unique-names-generator";
 import { USERNAME_LENGTH_MAX } from "ott-common/constants.js";
@@ -36,6 +36,7 @@ import { OttException } from "ott-common/exceptions.js";
 import {
 	OttApiRequestAccountRecoveryStartSchema,
 	OttApiRequestAccountRecoveryVerifySchema,
+	OttApiRequestRegisterSchema,
 } from "ott-common/models/zod-schemas.js";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -133,6 +134,17 @@ router.post("/", nocache(), async (req, res) => {
 			success: false,
 			error: {
 				message: "Missing argument (username)",
+			},
+		});
+		return;
+	}
+	// A session's username goes to everyone in the room, whose pages expect text.
+	if (typeof req.body.username !== "string") {
+		res.status(400).json({
+			success: false,
+			error: {
+				name: "BadApiArgumentException",
+				message: "Username must be text",
 			},
 		});
 		return;
@@ -250,6 +262,16 @@ router.post("/login", async (req, res, next) => {
 	// For backwards compatibility
 	req.body.user = req.body.user ?? req.body.email ?? req.body.username;
 
+	if (typeof req.body.user !== "string" || typeof req.body.password !== "string") {
+		res.status(401).json({
+			success: false,
+			error: {
+				message: "Either the user or password was not provided.",
+			},
+		});
+		return;
+	}
+
 	passport.authenticate("local", (err, user: User) => {
 		if (err) {
 			res.status(401).json({
@@ -261,7 +283,7 @@ router.post("/login", async (req, res, next) => {
 			return;
 		}
 		if (user) {
-			req.login(user, async err => {
+			req.login(user, err => {
 				if (err) {
 					log.error("Unknown error when logging in");
 					res.status(500).json({
@@ -272,19 +294,8 @@ router.post("/login", async (req, res, next) => {
 					});
 					return;
 				}
-				req.ottsession = { isLoggedIn: true, user_id: user.id };
-				await tokens.setSessionInfo(req.token!, req.ottsession);
-				try {
-					onUserLogIn(user, req.token!);
-				} catch (err) {
-					log.error(
-						`An unknown error occurred when running onUserLogIn: ${err} ${err.message}`,
-					);
-				}
-				res.json({
-					success: true,
-					user: _.pick(user, ["email", "username"]),
-				});
+				// Passport ignores what this callback returns, so this has to catch its own rejections.
+				void finishLogIn(req, res, next, user, 200);
 			});
 		} else {
 			res.status(401).json({
@@ -297,20 +308,16 @@ router.post("/login", async (req, res, next) => {
 	})(req, res, next);
 });
 
-router.post("/logout", async (req, res) => {
+router.post("/logout", async (req, res, next) => {
 	if (req.user) {
 		const user = req.user;
-		req.logout(async err => {
+		req.logout(err => {
 			if (err) {
 				log.error(`Error logging out user ${err}`);
+				next(err);
 				return;
 			}
-			req.ottsession = { isLoggedIn: false, username: uniqueNamesGenerator() };
-			await tokens.setSessionInfo(req.token!, req.ottsession);
-			onUserLogOut(user, req.token!);
-			res.json({
-				success: true,
-			});
+			void finishLogOut(req, res, next, user);
 		});
 	} else {
 		res.status(400).json({
@@ -322,27 +329,30 @@ router.post("/logout", async (req, res) => {
 	}
 });
 
-router.post("/register", async (req, res) => {
+router.post("/register", async (req, res, next) => {
 	if (!(await consumeRateLimitPoints(res, req.ip, 100))) {
 		return;
 	}
+	const body = OttApiRequestRegisterSchema.safeParse(req.body);
+	if (!body.success) {
+		res.status(400).json({
+			success: false,
+			error: {
+				name: "ValidationError",
+				message: "Username and password must be text.",
+			},
+		});
+		return;
+	}
 	try {
-		const result = await registerUser(req.body);
+		const result = await registerUser(body.data);
 		log.info(`User registered: ${result.id}`);
-		req.login(result, async () => {
-			req.ottsession = { isLoggedIn: true, user_id: result.id };
-			await tokens.setSessionInfo(req.token!, req.ottsession);
-			try {
-				onUserLogIn(result, req.token!);
-			} catch (err) {
-				log.error(
-					`An unknown error occurred when running onUserLogIn: ${err} ${err.message}`,
-				);
+		req.login(result, loginErr => {
+			if (loginErr) {
+				next(loginErr);
+				return;
 			}
-			res.status(201).json({
-				success: true,
-				user: _.pick(result, ["email", "username"]),
-			});
+			void finishLogIn(req, res, next, result, 201);
 		});
 	} catch (err) {
 		if (err instanceof Error) {
@@ -618,7 +628,15 @@ function passportErrorHandler(err, req: express.Request, res: express.Response, 
 	}
 }
 
-async function registerUser({ email, username, password }): Promise<User> {
+async function registerUser({
+	email,
+	username,
+	password,
+}: {
+	email?: string | null;
+	username: string;
+	password: string;
+}): Promise<User> {
 	if (!conf.get("users.enable_registration")) {
 		throw new FeatureDisabledException("Disabled by administrator.");
 	}
@@ -739,6 +757,50 @@ async function getUser(options: { user?: string; id?: number; discordId?: string
 	return user;
 }
 
+async function finishLogIn(
+	req: express.Request,
+	res: express.Response,
+	next: express.NextFunction,
+	user: User,
+	status: number,
+): Promise<void> {
+	try {
+		const session: SessionInfo = { isLoggedIn: true, user_id: user.id };
+		req.ottsession = session;
+		await tokens.setSessionInfo(req.token!, session);
+		try {
+			onUserLogIn(user, req.token!);
+		} catch (err) {
+			log.error(`An unknown error occurred when running onUserLogIn: ${err} ${err.message}`);
+		}
+		res.status(status).json({
+			success: true,
+			user: _.pick(user, ["email", "username"]),
+		});
+	} catch (err) {
+		next(err);
+	}
+}
+
+async function finishLogOut(
+	req: express.Request,
+	res: express.Response,
+	next: express.NextFunction,
+	user: User,
+): Promise<void> {
+	try {
+		const session: SessionInfo = { isLoggedIn: false, username: uniqueNamesGenerator() };
+		req.ottsession = session;
+		await tokens.setSessionInfo(req.token!, session);
+		onUserLogOut(user, req.token!);
+		res.json({
+			success: true,
+		});
+	} catch (err) {
+		next(err);
+	}
+}
+
 function onUserLogIn(user: User, token: AuthToken) {
 	log.info(`${user.username} (id: ${user.id}) has logged in.`);
 	onUserModified(token);
@@ -779,8 +841,8 @@ const accountRecoveryStart: RequestHandler<
 	OttApiRequestAccountRecoveryStart
 > = async (req, res) => {
 	const body = OttApiRequestAccountRecoveryStartSchema.parse(req.body);
-	if (conf.get("rate_limit.enabled")) {
-		await consumeRateLimitPoints(res, req.ip, 100);
+	if (!(await consumeRateLimitPoints(res, req.ip, 100))) {
+		return;
 	}
 
 	const query = {
@@ -807,8 +869,8 @@ const accountRecoveryVerify: RequestHandler<
 > = async (req, res) => {
 	const body = OttApiRequestAccountRecoveryVerifySchema.parse(req.body);
 
-	if (conf.get("rate_limit.enabled")) {
-		await consumeRateLimitPoints(res, req.ip, 10);
+	if (!(await consumeRateLimitPoints(res, req.ip, 10))) {
+		return;
 	}
 
 	if (!isPasswordValid(body.newPassword)) {

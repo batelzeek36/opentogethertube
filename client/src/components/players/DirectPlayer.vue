@@ -43,6 +43,7 @@ import type {
 	MediaPlayerWithCaptions,
 	MediaPlayerWithPlaybackRate,
 	MediaPlayerWithQuality,
+	MediaPlayerWithSyncRate,
 } from "../composables";
 import { useCaptions, useMediaAudioBoost, useQualities } from "../composables";
 
@@ -376,6 +377,28 @@ async function setPlaybackRate(rate: number): Promise<void> {
 	videoElem.value.playbackRate = rate;
 }
 
+/** Written only when it changes: every write makes a browser re-time its audio. */
+function setSyncRate(rate: number): void {
+	const video = videoElem.value;
+	if (!video || video.playbackRate === rate) {
+		return;
+	}
+	// So nobody sounds different for the few seconds this lasts. On by default in browsers today.
+	video.preservesPitch = true;
+	(video as HTMLVideoElement & { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
+	video.playbackRate = rate;
+}
+
+function isSettled(): boolean {
+	const video = videoElem.value;
+	return !!video && !video.seeking && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA;
+}
+
+function canAdjustRate(): boolean {
+	const video = videoElem.value;
+	return !!video && !video.paused && !video.ended && isSettled();
+}
+
 function setAudioBoost(boost: number): void {
 	audioBoost.setBoost(boost);
 }
@@ -522,8 +545,11 @@ defineExpose({
 	getAvailablePlaybackRates,
 	getPlaybackRate,
 	setPlaybackRate,
+	setSyncRate,
+	isSettled,
+	canAdjustRate,
 	setAudioBoost,
-} satisfies MediaPlayerWithCaptions & MediaPlayerWithPlaybackRate & MediaPlayerWithAudioBoost & MediaPlayerWithQuality);
+} satisfies MediaPlayerWithCaptions & MediaPlayerWithPlaybackRate & MediaPlayerWithAudioBoost & MediaPlayerWithQuality & MediaPlayerWithSyncRate);
 </script>
 
 <!-- biome-ignore lint/nursery/useScopedStyles: biome migration -->

@@ -13,7 +13,8 @@ import type {
 	BehaviorOption,
 } from "./types.js";
 import type { QueueItem, QueueItemExtras, VideoId, VideoAdd } from "./video.js";
-import type { Reaction } from "./reactions.js";
+import type { ChatMessageId, ChatReactionCount, Reaction } from "./reactions.js";
+import type { DeviceType } from "./device.js";
 import type { VoiceChannelId, VoiceYouEvent } from "./voice.js";
 
 export type ServerMessage =
@@ -21,6 +22,7 @@ export type ServerMessage =
 	| ServerMessageUnload
 	| ServerMessageChat
 	| ServerMessageReaction
+	| ServerMessageChatReactions
 	| ServerMessageEvent
 	| ServerMessageEventCustom
 	| ServerMessageAnnouncement
@@ -73,6 +75,8 @@ export interface ServerMessageUnload extends ServerMessageBase {
 
 export interface ServerMessageChat extends ServerMessageBase {
 	action: "chat";
+	/** What reactions refer to. A server from before reactions sends none. */
+	id?: ChatMessageId;
 	from: RoomUserInfo;
 	text: string;
 }
@@ -83,8 +87,24 @@ export interface ServerMessageReaction extends ServerMessageBase {
 	emoji: Reaction;
 }
 
+/** Reactions on chat messages, worded for the one client it is sent to. */
+export interface ServerMessageChatReactions extends ServerMessageBase {
+	action: "chat-reactions";
+	/** The full current reactions of each message listed. */
+	messages: { id: ChatMessageId; reactions: ChatReactionCount[] }[];
+	/** Everything the room remembers, so a message not listed has no reactions. */
+	complete?: boolean;
+	/** Messages the room no longer remembers, which can no longer be reacted to. */
+	closed?: ChatMessageId[];
+}
+
+/** Refers to a room event the server remembers, so clients never have to describe one. */
+export type RoomEventId = string;
+
 export interface ServerMessageEvent extends ServerMessageBase {
 	action: "event";
+	/** What to undo this event by. Only events that can be undone have one. */
+	id?: RoomEventId;
 	request: RoomRequest;
 	user: Pick<RoomUserInfo, "name" | "isLoggedIn">;
 	additional: RoomEventContext;
@@ -153,6 +173,7 @@ export interface UserInfo extends RoomUserInfo {
 export type ClientMessage =
 	| ClientMessageKickMe
 	| ClientMessagePlayerStatus
+	| ClientMessageDevice
 	| ClientMessageAuthenticate
 	| ClientMessageNotify
 	| ClientMessageRoomRequest;
@@ -172,6 +193,12 @@ export interface ClientMessageKickMe extends ClientMessageBase {
 export interface ClientMessagePlayerStatus extends ClientMessageBase {
 	action: "status";
 	status: PlayerStatus;
+}
+
+/** Inform the server what kind of device this is, so people can tell someone's devices apart. */
+export interface ClientMessageDevice extends ClientMessageBase {
+	action: "device";
+	device: DeviceType;
 }
 
 export interface ClientMessageAuthenticate extends ClientMessageBase {
@@ -239,7 +266,8 @@ export type RoomRequest =
 	| VoiceLeaveRequest
 	| VoiceTalkRequest
 	| VoiceRemoveRequest
-	| VoiceAllowRequest;
+	| VoiceAllowRequest
+	| ChatReactionRequest;
 
 export enum RoomRequestType {
 	JoinRequest,
@@ -268,6 +296,8 @@ export enum RoomRequestType {
 	VoiceTalkRequest,
 	VoiceRemoveRequest,
 	VoiceAllowRequest,
+	// New types go last: open tabs send these numbers, so existing ones can never shift.
+	ChatReactionRequest,
 }
 
 export interface RoomRequestBase {
@@ -351,6 +381,14 @@ export interface ReactionRequest extends RoomRequestBase {
 	emoji: Reaction;
 }
 
+/** Add or take back this person's reaction on a chat message. */
+export interface ChatReactionRequest extends RoomRequestBase {
+	type: RoomRequestType.ChatReactionRequest;
+	messageId: ChatMessageId;
+	emoji: Reaction;
+	add: boolean;
+}
+
 export interface VoiceJoinRequest extends RoomRequestBase {
 	type: RoomRequestType.VoiceJoinRequest;
 	channel: VoiceChannelId;
@@ -380,7 +418,7 @@ export interface VoiceAllowRequest extends RoomRequestBase {
 
 export interface UndoRequest extends RoomRequestBase {
 	type: RoomRequestType.UndoRequest;
-	event: ServerMessageEvent;
+	eventId: RoomEventId;
 }
 
 export interface ApplySettingsRequest extends RoomRequestBase {

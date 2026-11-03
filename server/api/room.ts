@@ -22,6 +22,7 @@ import type {
 	OttApiRequestRemoveFromQueue,
 	OttApiRequestUpdateQueueItem,
 	OttApiRequestRoomCreate,
+	OttApiRequestUndo,
 	OttApiRequestVote,
 	OttApiResponseGetRoom,
 	OttApiResponseRoomCreate,
@@ -36,6 +37,7 @@ import { counterHttpErrors } from "../metrics.js";
 import { conf } from "../ott-config.js";
 import {
 	OttApiRequestRoomCreateSchema,
+	OttApiRequestUndoSchema,
 	OttApiRequestVoteSchema,
 	OttApiRequestAddToQueueSchema,
 	OttApiRequestRemoveFromQueueSchema,
@@ -213,7 +215,7 @@ const patchRoom: RequestHandler<{ name: string }, unknown, OttApiRequestPatchRoo
 				// HACK: force the room to send the updated user info to the client
 				for (const user of room.realusers) {
 					if (user.user_id === room.owner?.id) {
-						room.syncUser(room.getUserInfo(user.id));
+						await room.syncUser(room.getUserInfo(user.id));
 						break;
 					}
 				}
@@ -354,14 +356,18 @@ const deleteRoom: RequestHandler<
 	});
 };
 
-const undoEvent: RequestHandler<{ name: string }> = async (req, res) => {
+const undoEvent: RequestHandler<{ name: string }, unknown, OttApiRequestUndo> = async (
+	req,
+	res,
+) => {
 	if (!req.token) {
 		throw new OttException("Missing token");
 	}
 	const client = clientmanager.getClientByToken(req.token, req.params.name);
+	const body = OttApiRequestUndoSchema.parse(req.body);
 	const request: UndoRequest = {
 		type: RoomRequestType.UndoRequest,
-		event: req.body.data.event,
+		eventId: body.eventId,
 	};
 
 	await clientmanager.makeRoomRequest(client, request);

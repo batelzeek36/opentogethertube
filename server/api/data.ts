@@ -19,6 +19,13 @@ const addPreview: RequestHandler<
 	if (!req.query.input) {
 		throw new BadApiArgumentException("input", "missing");
 	}
+	// A query string can make either of these an array or an object.
+	if (typeof req.query.input !== "string") {
+		throw new BadApiArgumentException("input", "must be text");
+	}
+	if (req.query.adapter !== undefined && typeof req.query.adapter !== "string") {
+		throw new BadApiArgumentException("adapter", "must be text");
+	}
 
 	let points = 5;
 	if (!InfoExtract.isURL(req.query.input)) {

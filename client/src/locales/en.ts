@@ -232,9 +232,18 @@ export default {
 		eyebrow: "The fine print",
 		contact: "Contact Info",
 	},
+	device: {
+		phone: "On a phone",
+		tablet: "On a tablet",
+		computer: "On a computer",
+	},
 	chat: {
 		title: "Chat",
 		"type-here": "Type your message here...",
+		"message-reactable": "Chat message. Press Enter to react.",
+		"reactions-for-message": "Reactions to this message",
+		"reaction-add": "Add your {emoji} to {count}",
+		"reaction-remove": "Take back your {emoji} from {count}",
 	},
 	"share-invite": {
 		title: "Share Invite",

@@ -19,8 +19,30 @@ import { conf } from "../ott-config.js";
 import { CustomMediaManifestSchema } from "ott-common/models/zod-schemas.js";
 
 const log = getLogger("direct");
+/** Far more than a real manifest needs, and all of it has to fit in memory before it can be parsed. */
+const MANIFEST_MAX_BYTES = 1024 * 1024;
+const MANIFEST_TIMEOUT_MS = 15_000;
 const DIRECT_MEDIA_URL_REGEX =
 	/\/*\.(mp(3|4v?)|mpg4|webm|flv|mkv|avi|wmv|qt|mov|ogv|m4v|h26[1-4]|ogg|json)$/;
+
+async function readManifestText(response: Response): Promise<string> {
+	const reader = response.body?.getReader();
+	const chunks: Uint8Array[] = [];
+	let total = 0;
+	while (reader) {
+		const { done, value } = await reader.read();
+		if (done) {
+			break;
+		}
+		total += value.length;
+		if (total > MANIFEST_MAX_BYTES) {
+			await reader.cancel();
+			throw new MissingMetadataException("The media manifest is too large.");
+		}
+		chunks.push(value);
+	}
+	return Buffer.concat(chunks).toString("utf8");
+}
 
 export default class DirectVideoAdapter extends ServiceAdapter {
 	ffprobe: FfprobeStrategy;
@@ -110,14 +132,16 @@ export default class DirectVideoAdapter extends ServiceAdapter {
 	async fetchManifestInfo(link: string): Promise<Video> {
 		let json: unknown;
 		try {
-			const response = await fetch(link);
+			const response = await fetch(link, {
+				signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS),
+			});
 			if (!response.ok) {
 				log.error(`Failed to fetch manifest at ${link}: ${response.status}`);
 				throw new MissingMetadataException(
 					`Failed to fetch the media manifest (HTTP ${response.status}). Please check that the URL is accessible.`,
 				);
 			}
-			json = await response.json();
+			json = JSON.parse(await readManifestText(response));
 		} catch (e) {
 			if (e instanceof MissingMetadataException) {
 				throw e;

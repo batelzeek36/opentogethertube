@@ -14,6 +14,7 @@ import tokens, { type SessionInfo } from "../../auth/tokens.js";
 import { RoomRequestType } from "ott-common/models/messages.js";
 import { type AuthToken, BehaviorOption, QueueMode, Role } from "ott-common/models/types.js";
 import { Room, RoomUser } from "../../room.js";
+import type { User } from "../../models/user.js";
 import infoextractor from "../../infoextractor.js";
 import type { Video, VideoId } from "ott-common/models/video.js";
 import permissions from "ott-common/permissions.js";
@@ -166,16 +167,44 @@ describe("Room", () => {
 				expect(room.playbackPosition).toEqual(15);
 			});
 
-			it.each([undefined, null])("should not seek if value is %s", async v => {
+			it.each([undefined, null, "abc", {}, [], true, Infinity, -Infinity, Number.NaN])(
+				"should not seek if value is %s",
+				async v => {
+					room.playbackPosition = 10;
+					await room.processUnauthorizedRequest(
+						{
+							type: RoomRequestType.SeekRequest,
+							value: v as unknown as number,
+						},
+						{ token: user.token },
+					);
+					expect(room.playbackPosition).toEqual(10);
+				},
+			);
+
+			it("should seek to the start for a position before it", async () => {
 				room.playbackPosition = 10;
 				await room.processUnauthorizedRequest(
-					{
-						type: RoomRequestType.SeekRequest,
-						value: v as unknown as number,
-					},
+					{ type: RoomRequestType.SeekRequest, value: -5 },
 					{ token: user.token },
 				);
-				expect(room.playbackPosition).toEqual(10);
+				expect(room.playbackPosition).toEqual(0);
+			});
+
+			it("should seek to the end for a position after it, so seeking can't skip", async () => {
+				room.currentSource = {
+					service: "direct",
+					id: "video",
+					title: "test",
+					description: "test",
+					thumbnail: "test",
+					length: 100,
+				};
+				await room.processUnauthorizedRequest(
+					{ type: RoomRequestType.SeekRequest, value: 1e308 },
+					{ token: user.token },
+				);
+				expect(room.playbackPosition).toEqual(100);
 			});
 		});
 
@@ -441,6 +470,149 @@ describe("Room", () => {
 			});
 		});
 
+		describe("device type", () => {
+			const update = (device: unknown) => ({
+				type: RoomRequestType.UpdateUser as const,
+				info: { id: "user", device } as never,
+			});
+			const context = { username: "test", role: Role.UnregisteredUser, clientId: "user" };
+
+			it("tells the room a known device type", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				await room.processRequest(update("phone"), context);
+				expect(room.getUserInfo("user").device).toEqual("phone");
+				expect(publish).toHaveBeenCalledWith(
+					expect.objectContaining({
+						action: "user",
+						update: {
+							kind: "update",
+							value: expect.objectContaining({ id: "user", device: "phone" }),
+						},
+					}),
+				);
+			});
+
+			it("has none until one is reported", () => {
+				expect(room.getUserInfo("user").device).toBeUndefined();
+			});
+
+			it.each(["smart fridge", "Mozilla/5.0 (iPhone)", 3, { $ne: 1 }])(
+				"ignores anything outside the list: %s",
+				async device => {
+					await room.processRequest(update("computer"), context);
+					await room.processRequest(update(device), context);
+					expect(room.getUserInfo("user").device).toEqual("computer");
+				},
+			);
+
+			it("keeps the device type when the person's name changes", async () => {
+				await room.processRequest(update("tablet"), context);
+				await room.processRequest(
+					{
+						type: RoomRequestType.UpdateUser,
+						info: { id: "user", username: "new name" },
+					},
+					context,
+				);
+				expect(room.getUserInfo("user")).toMatchObject({
+					name: "new name",
+					device: "tablet",
+				});
+			});
+		});
+
+		describe("chat", () => {
+			const context = { username: "test", role: Role.UnregisteredUser, clientId: "user" };
+
+			it("keeps request numbers stable, because open tabs send them", () => {
+				expect(RoomRequestType.VoiceAllowRequest).toEqual(25);
+				expect(RoomRequestType.ChatReactionRequest).toEqual(26);
+			});
+
+			it("gives each chat message an id", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				await room.processRequest(
+					{ type: RoomRequestType.ChatRequest, text: "hi" },
+					context,
+				);
+				await room.processRequest(
+					{ type: RoomRequestType.ChatRequest, text: "hi" },
+					context,
+				);
+				const ids = publish.mock.calls.map(([msg]) => (msg as { id?: string }).id);
+				expect(ids[0]).toEqual(expect.any(String));
+				expect(ids[1]).toEqual(expect.any(String));
+				expect(ids[0]).not.toEqual(ids[1]);
+			});
+
+			it("sends a reaction on a chat message to each client, not to the whole room", async () => {
+				const publish = vi.spyOn(room, "publish").mockResolvedValue();
+				const command = vi.spyOn(room, "command").mockResolvedValue();
+				await room.processRequest(
+					{ type: RoomRequestType.ChatRequest, text: "hi" },
+					context,
+				);
+				const messageId = (publish.mock.calls[0][0] as { id: string }).id;
+				publish.mockClear();
+				await room.processRequest(
+					{
+						type: RoomRequestType.ChatReactionRequest,
+						messageId,
+						emoji: "🔥",
+						add: true,
+					},
+					context,
+				);
+				expect(publish).not.toHaveBeenCalled();
+				expect(command).toHaveBeenCalledWith({
+					type: "send",
+					clientId: "user",
+					msg: {
+						action: "chat-reactions",
+						messages: [
+							{
+								id: messageId,
+								reactions: [{ emoji: "🔥", count: 1, mine: true }],
+							},
+						],
+					},
+				});
+			});
+
+			it("refuses a reaction from a role without the chat permission", async () => {
+				room.grants.setRoleGrants(Role.UnregisteredUser, 0);
+				await expect(
+					room.processRequest(
+						{
+							type: RoomRequestType.ChatReactionRequest,
+							messageId: "any",
+							emoji: "🔥",
+							add: true,
+						},
+						context,
+					),
+				).rejects.toThrow();
+			});
+
+			it("catches a joining client up on reactions", async () => {
+				const command = vi.spyOn(room, "command").mockResolvedValue();
+				await room.processRequest(
+					{ type: RoomRequestType.JoinRequest, info: { id: "late", username: "late" } },
+					{
+						username: "late",
+						role: Role.UnregisteredUser,
+						clientId: "late",
+						auth: { token: "late-token" as AuthToken, clientId: "late" },
+					},
+				);
+				expect(command).toHaveBeenCalledWith({
+					type: "send",
+					clientId: "late",
+					msg: { action: "chat-reactions", complete: true, messages: [] },
+				});
+			});
+		});
+
 		describe("voice", () => {
 			const owner = { id: 1, username: "owner" } as never;
 			const memberContext = {
@@ -674,7 +846,49 @@ describe("Room", () => {
 			});
 		});
 
+		describe("PromoteRequest", () => {
+			it("can't be used to strip someone's role by asking to make them owner", async () => {
+				room.grants.setRoleGrants(Role.UnregisteredUser, 0);
+				const moderator = { id: "mod", username: "mod", user_id: 5 };
+				const addedUsers = room.realusers;
+				addedUsers.push(moderator as never);
+				room.userRoles.get(Role.Moderator)?.add(5);
+				await expect(
+					room.processRequest(
+						{
+							type: RoomRequestType.PromoteRequest,
+							targetClientId: "mod",
+							role: Role.Owner,
+						},
+						{ username: "viewer", role: Role.UnregisteredUser, clientId: "viewer" },
+					),
+				).rejects.toThrow();
+				expect(room.userRoles.get(Role.Moderator)?.has(5)).toEqual(true);
+			});
+		});
+
 		describe("RestoreQueueRequest", () => {
+			it("takes permission to add to the queue", async () => {
+				room.prevQueue = [
+					{
+						service: "direct",
+						id: "video",
+						title: "test",
+						description: "test",
+						thumbnail: "test",
+						length: 10,
+					},
+				];
+				room.grants.setRoleGrants(Role.UnregisteredUser, 0);
+				await expect(
+					room.processRequest(
+						{ type: RoomRequestType.RestoreQueueRequest, discard: true },
+						{ username: "viewer", role: Role.UnregisteredUser, clientId: "viewer" },
+					),
+				).rejects.toThrow();
+				expect(room.prevQueue).not.toBeNull();
+			});
+
 			it("should restore the queue", async () => {
 				const prevQueue: VideoId[] = [
 					{ service: "direct", id: "video1" },
@@ -845,6 +1059,49 @@ describe("Room", () => {
 		});
 
 		expect(await room.getRoleFromToken("fake")).toEqual(Role.RegisteredUser);
+	});
+
+	describe("promoting users", () => {
+		const context = { username: "viewer", role: Role.UnregisteredUser, clientId: "viewer" };
+		const promote = (role: unknown) => ({
+			type: RoomRequestType.PromoteRequest as const,
+			targetClientId: "moderator",
+			role: role as Role,
+		});
+		let room: Room;
+		let moderator: RoomUser;
+
+		beforeEach(() => {
+			room = new Room({ name: "test" });
+			moderator = new RoomUser("moderator", "moderator-token");
+			moderator.user_id = 7;
+			moderator.user = { id: 7, username: "moderator" } as User;
+			room.realusers = [moderator, new RoomUser("viewer", "viewer-token")];
+			room.userRoles.get(Role.Moderator)?.add(7);
+		});
+
+		it.each([[5], ["4"], [2.5], [null], [{}]])(
+			"does not take a role away with a role that does not exist: %s",
+			async role => {
+				await expect(room.processRequest(promote(role), context)).rejects.toThrow();
+				expect(room.getRole(moderator)).toEqual(Role.Moderator);
+			},
+		);
+
+		it("does not let a viewer demote someone with a real role", async () => {
+			await expect(
+				room.processRequest(promote(Role.RegisteredUser), context),
+			).rejects.toThrow(PermissionDeniedException);
+			expect(room.getRole(moderator)).toEqual(Role.Moderator);
+		});
+
+		it("lets someone with the grant promote and demote", async () => {
+			const owner = { ...context, role: Role.Owner };
+			await room.processRequest(promote(Role.Administrator), owner);
+			expect(room.getRole(moderator)).toEqual(Role.Administrator);
+			await room.processRequest(promote(Role.RegisteredUser), owner);
+			expect(room.getRole(moderator)).toEqual(Role.RegisteredUser);
+		});
 	});
 
 	describe("restore queue behavior", () => {

@@ -2,7 +2,7 @@
 	<div>
 		<Transition name="banner">
 			<div
-				v-if="(store.state.room.prevQueue?.length ?? 0) > 0"
+				v-if="(store.state.room.prevQueue?.length ?? 0) > 0 && granted('manage-queue.add')"
 				class="restore flex flex-col gap-3 rounded-lg border bg-card p-4 sm:flex-row sm:items-center"
 				data-cy="restore-banner"
 			>
@@ -62,11 +62,13 @@ import { ref } from "vue";
 import { useStore } from "../store";
 import { useConnection } from "@/plugins/connection";
 import { useRoomApi } from "@/util/roomapi";
+import { useGrants } from "@/components/composables/grants";
 import VideoQueueItem from "./VideoQueueItem.vue";
 
 const store = useStore();
 const connection = useConnection();
 const roomapi = useRoomApi(connection);
+const granted = useGrants();
 
 const showRestorePreview = ref(false);
 

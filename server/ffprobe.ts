@@ -2,7 +2,7 @@ import ffprobeInstaller from "@ffprobe-installer/ffprobe";
 import { getLogger } from "./logger.js";
 import childProcess from "node:child_process";
 import axios from "axios";
-import type { Stream } from "node:stream";
+import type { Readable } from "node:stream";
 import fs from "node:fs/promises";
 import path from "node:path";
 // FIXME: remove node-abort-controller package when we stop supporting node 14.
@@ -22,6 +22,10 @@ const FFPROBE_TIMEOUT_MS = 35000;
 const FFPROBE_CHILDREN = new Set<childProcess.ChildProcess>();
 
 function registerFfprobeChild(child: childProcess.ChildProcess): void {
+	// An "error" event with nobody listening ends the process, and a child that can't start has one.
+	child.on("error", e => {
+		log.error(`ffprobe child error: ${String(e)}`);
+	});
 	try {
 		FFPROBE_CHILDREN.add(child);
 		log.debug(`registered ffprobe child pid=${child.pid}, total now=${FFPROBE_CHILDREN.size}`);
@@ -70,7 +74,7 @@ process.once("SIGTERM", () => killAllFfprobeChildren("sigterm"));
 
 function streamDataIntoFfprobe(
 	ffprobePath: string,
-	stream: Stream,
+	stream: Readable,
 	controller: AbortController,
 ): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -124,9 +128,20 @@ function streamDataIntoFfprobe(
 			}
 		};
 
+		child.on("error", error => {
+			clearHardKiller();
+			stream.destroy();
+			rejectOnce(error);
+		});
+
 		function finalize() {
 			clearHardKiller();
 			stream.removeAllListeners();
+			// The download is about to be cut off, and that can still surface here as an error, like a
+			// connection reset. With no listener, that would end the process.
+			stream.on("error", e => {
+				log.debug(`http stream error after ffprobe finished: ${String(e)}`);
+			});
 			stream.emit("end");
 			try {
 				controller.abort();
@@ -143,11 +158,16 @@ function streamDataIntoFfprobe(
 			if (child.stdin.destroyed) {
 				return;
 			}
-			child.stdin.write(data, e => {
+			const hasRoom = child.stdin.write(data, e => {
 				if (e) {
 					log.debug(`write failed (destroyed: ${child.stdin.destroyed}): ${String(e)}`);
 				}
 			});
+			// A host can send faster than ffprobe reads, and whatever it can't take piles up in memory.
+			if (!hasRoom) {
+				stream.pause();
+				child.stdin.once("drain", () => stream.resume());
+			}
 		});
 		child.stdin.on("error", e => {
 			log.debug(`ffprobe stdin error: ${String(e)}`);
@@ -290,7 +310,7 @@ export class OnDiskPreviewFfprobe extends FfprobeStrategy {
 		const httpAgent = new http.Agent({ keepAlive: false });
 		const httpsAgent = new https.Agent({ keepAlive: false });
 		const controller = new AbortController();
-		const resp = await axios.get<Stream>(uri, {
+		const resp = await axios.get<Readable>(uri, {
 			responseType: "stream",
 			signal: controller.signal,
 			httpAgent,
@@ -394,7 +414,7 @@ export class StreamFfprobe extends FfprobeStrategy {
 		const httpAgent = new http.Agent({ keepAlive: false });
 		const httpsAgent = new https.Agent({ keepAlive: false });
 		const controller = new AbortController();
-		const resp = await axios.get<Stream>(uri, {
+		const resp = await axios.get<Readable>(uri, {
 			responseType: "stream",
 			signal: controller.signal,
 			httpAgent,

@@ -61,7 +61,11 @@ const QueueItemExtrasSchema = z.object({
 	subtitleUrl: z.string().url().optional(),
 });
 
-const VideoAddSchema = VideoIdSchema.extend(QueueItemExtrasSchema.shape);
+export const VideoAddSchema = VideoIdSchema.extend(QueueItemExtrasSchema.shape);
+
+export const OttApiRequestUndoSchema = z.object({
+	eventId: z.string(),
+});
 
 export const OttApiRequestVoteSchema = z.object({
 	...VideoIdSchema.shape,
@@ -82,6 +86,12 @@ export const OttApiRequestRemoveFromQueueSchema = z.object({
 });
 
 export const OttApiRequestUpdateQueueItemSchema = VideoIdSchema.extend(QueueItemExtrasSchema.shape);
+
+export const OttApiRequestRegisterSchema = z.object({
+	email: z.string().nullish(),
+	username: z.string(),
+	password: z.string(),
+});
 
 export const OttApiRequestAccountRecoveryStartSchema = z.union([
 	z.object({

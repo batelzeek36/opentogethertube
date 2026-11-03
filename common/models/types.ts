@@ -2,6 +2,8 @@ import type { Session } from "express-session";
 import type { QueueItem, Video } from "./video.js";
 import type { Grants } from "../permissions.js";
 import type { Category } from "sponsorblock-api";
+import type { ChatMessageId } from "./reactions.js";
+import type { DeviceType } from "./device.js";
 
 export enum Visibility {
 	Public = "public",
@@ -51,6 +53,7 @@ export type ClientInfo = {
 	username?: string;
 	user_id?: number;
 	status?: PlayerStatus;
+	device?: DeviceType;
 };
 
 /**
@@ -88,6 +91,8 @@ export type RoomUserInfo = {
 	isLoggedIn: boolean;
 	status: PlayerStatus;
 	role: Role;
+	/** Unset when unknown, as for anyone on a tab older than this field. */
+	device?: DeviceType;
 };
 
 export enum Role {
@@ -110,6 +115,7 @@ export interface RoomEventContext {
 }
 
 export interface ChatMessage {
+	id?: ChatMessageId;
 	from: RoomUserInfo;
 	text: string;
 }

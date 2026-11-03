@@ -1,10 +1,10 @@
 import type { Grants } from "../permissions.js";
-import type { ServerMessageEvent } from "./messages.js";
 import type { BehaviorOption, QueueMode, RoomSettings, RoomUserInfo, Visibility } from "./types.js";
 import type { QueueItem, Video } from "./video.js";
 import type { Category } from "sponsorblock-api";
 import type {
 	OttApiRequestRoomCreateSchema,
+	OttApiRequestUndoSchema,
 	OttApiRequestVoteSchema,
 	OttApiRequestAddToQueueSchema,
 	OttApiRequestRemoveFromQueueSchema,
@@ -73,9 +73,7 @@ export interface OttApiResponseGetRoom extends RoomSettings {
 
 export type OttApiRequestPatchRoom = z.infer<typeof OttApiRequestPatchRoomSchema>;
 
-export interface OttApiRequestUndo {
-	event: ServerMessageEvent;
-}
+export type OttApiRequestUndo = z.infer<typeof OttApiRequestUndoSchema>;
 
 export type OttApiRequestAddToQueue = z.infer<typeof OttApiRequestAddToQueueSchema>;
 

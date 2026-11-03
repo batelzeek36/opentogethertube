@@ -1,14 +1,18 @@
 import permissions, { type GrantMask, Grants } from "ott-common/permissions.js";
+import { isDeviceType, type DeviceType } from "ott-common/models/device.js";
 import { isReaction } from "ott-common/models/reactions.js";
 import { VOICE_RULE_DEFAULTS } from "ott-common/models/voice.js";
 import { VoiceRulesSchema } from "ott-common/models/zod-schemas.js";
 import { VoiceChannels } from "./voice.js";
+import { ChatReactions } from "./chat-reactions.js";
+import { UndoableEvents } from "./room-undo.js";
 import { redisClient } from "./redisclient.js";
 import { getLogger } from "./logger.js";
 import type winston from "winston";
 import type {
 	AddRequest,
 	ApplySettingsRequest,
+	ChatReactionRequest,
 	ChatRequest,
 	ReactionRequest,
 	VoiceAllowRequest,
@@ -104,6 +108,7 @@ export class RoomUser {
 	unregisteredUsername = "";
 	user: User | null;
 	playerStatus: PlayerStatus = PlayerStatus.none;
+	device?: DeviceType;
 
 	constructor(id: ClientId, token: AuthToken) {
 		this.id = id;
@@ -131,6 +136,9 @@ export class RoomUser {
 			this.unregisteredUsername = info.username;
 			this.user_id = undefined;
 			this.user = null;
+		}
+		if (isDeviceType(info.device)) {
+			this.device = info.device;
 		}
 		if (info.status) {
 			this.playerStatus = info.status;
@@ -268,11 +276,16 @@ export class Room implements RoomState {
 		}),
 		publish: msg => void this.publish(msg),
 		sendTo: (clientId, msg) => void this.command({ type: "send", clientId, msg }),
-		personKey: clientId => {
-			const user = this.getUser(clientId);
-			return user && (user.user_id ? `user:${user.user_id}` : `token:${user.token}`);
-		},
+		personKey: clientId => this.personKey(clientId),
 		clientIds: () => this.realusers.map(user => user.id),
+	});
+	/** Held in memory only: an event's undo button does not outlive the room being loaded. */
+	undoableEvents = new UndoableEvents(this);
+	/** Reactions on chat messages. Held in memory only, see ChatReactions. */
+	chatReactions = new ChatReactions({
+		personKey: clientId => this.personKey(clientId),
+		clientIds: () => this.realusers.map(user => user.id),
+		sendTo: (clientId, msg) => void this.command({ type: "send", clientId, msg }),
 	});
 
 	_currentSource: QueueItem | null = null;
@@ -563,6 +576,7 @@ export class Room implements RoomState {
 				isLoggedIn: user.isLoggedIn,
 				status: user.playerStatus,
 				role: this.getRole(user),
+				device: user.device,
 			};
 			infos.push(info);
 		}
@@ -571,7 +585,7 @@ export class Room implements RoomState {
 
 	private markDirty(prop: keyof RoomStateSyncable): void {
 		this._dirty.add(prop);
-		this.throttledSync();
+		void this.throttledSync();
 	}
 
 	private cleanDirty() {
@@ -667,6 +681,7 @@ export class Room implements RoomState {
 		const user = this.getUserInfo(context.clientId);
 		await this.publish({
 			action: "event",
+			id: this.undoableEvents.record(request, additional ?? {}),
 			request,
 			user,
 			additional: additional ?? {},
@@ -721,6 +736,12 @@ export class Room implements RoomState {
 		} else {
 			return Role.UnregisteredUser;
 		}
+	}
+
+	/** Identifies a person across reconnects: their account, or their browser's token. */
+	private personKey(clientId: ClientId): string | undefined {
+		const user = this.getUser(clientId);
+		return user && (user.user_id ? `user:${user.user_id}` : `token:${user.token}`);
 	}
 
 	getUser(client: ClientId): RoomUser | undefined {
@@ -898,7 +919,18 @@ export class Room implements RoomState {
 		}
 	}
 
-	throttledSync = _.debounce(this.sync, 50, { trailing: true });
+	/** Nothing waits for this, so a failure has to stop here or it takes the whole process down. */
+	throttledSync = _.debounce(
+		async () => {
+			try {
+				await this.sync();
+			} catch (e) {
+				this.log.error(`Failed to sync room: ${e}`);
+			}
+		},
+		50,
+		{ trailing: true },
+	);
 
 	/**
 	 * Serialize the room's state so that it can be stored in redis
@@ -928,7 +960,14 @@ export class Room implements RoomState {
 		});
 	}
 
-	saveStateToRedisDebounced = _.debounce(this.saveStateToRedis, 5000);
+	/** Nothing waits for this either, see throttledSync. */
+	saveStateToRedisDebounced = _.debounce(async () => {
+		try {
+			await this.saveStateToRedis();
+		} catch (e) {
+			this.log.error(`Failed to save room: ${e}`);
+		}
+	}, 5000);
 
 	private buildPreviousQueue(): QueueItem[] | null {
 		const prevQueue = [...this.queue.items];
@@ -1145,7 +1184,9 @@ export class Room implements RoomState {
 			[RoomRequestType.VoteRequest, "manage-queue.vote"],
 			[RoomRequestType.ChatRequest, "chat"],
 			[RoomRequestType.ReactionRequest, "chat"],
+			[RoomRequestType.ChatReactionRequest, "chat"],
 			[RoomRequestType.PlayNowRequest, "manage-queue.play-now"],
+			[RoomRequestType.RestoreQueueRequest, "manage-queue.add"],
 			[RoomRequestType.ShuffleRequest, "manage-queue.order"],
 			[RoomRequestType.PlaybackSpeedRequest, "playback.speed"],
 			[RoomRequestType.KickRequest, "manage-users.kick"],
@@ -1180,6 +1221,7 @@ export class Room implements RoomState {
 			[RoomRequestType.UpdateUser]: "updateUser",
 			[RoomRequestType.ChatRequest]: "chat",
 			[RoomRequestType.ReactionRequest]: "react",
+			[RoomRequestType.ChatReactionRequest]: "reactToChat",
 			[RoomRequestType.UndoRequest]: "undo",
 			[RoomRequestType.ApplySettingsRequest]: "applySettings",
 			[RoomRequestType.PlayNowRequest]: "playNow",
@@ -1283,7 +1325,7 @@ export class Room implements RoomState {
 			const current = this.currentSource;
 			const prevPosition = this.realPlaybackPosition;
 			counterMediaSkipped.labels({ service: this.currentSource.service }).inc();
-			this.dequeueNext();
+			await this.dequeueNext();
 			await this.publishRoomEvent(request, context, { video: current, prevPosition });
 			this.videoSegments = [];
 		}
@@ -1304,13 +1346,15 @@ export class Room implements RoomState {
 	 * Seek to the specified position in the video.
 	 */
 	public async seek(request: SeekRequest, context: RoomRequestContext): Promise<void> {
-		if (request.value === undefined || request.value === null) {
-			this.log.error("seek value was undefined or null");
+		if (typeof request.value !== "number" || !Number.isFinite(request.value)) {
+			this.log.error("seek value was not a number");
 			return;
 		}
+		// Past the end would be a skip, which takes a permission that seeking doesn't.
+		const value = _.clamp(request.value, 0, this.currentSource?.length || Infinity);
 		const prev = this.realPlaybackPosition;
-		this.seekRaw(request.value);
-		await this.publishRoomEvent(request, context, { prevPosition: prev });
+		this.seekRaw(value);
+		await this.publishRoomEvent({ ...request, value }, context, { prevPosition: prev });
 
 		const segment = this.getSegmentForTime(this.playbackPosition);
 		if (segment !== undefined) {
@@ -1352,7 +1396,7 @@ export class Room implements RoomState {
 				}
 				video.subtitleUrl = request.video.subtitleUrl;
 			}
-			this.queue.enqueue(video);
+			await this.queue.enqueue(video);
 			this.log.info(`Video added: ${JSON.stringify(request.video)}`);
 			this.prevQueue = null;
 			await this.publishRoomEvent(request, context, { video });
@@ -1374,7 +1418,7 @@ export class Room implements RoomState {
 				throw new VideoAlreadyQueuedException();
 			}
 
-			this.queue.enqueue(...videos);
+			await this.queue.enqueue(...videos);
 			this.log.info(`added ${videos.length} videos`);
 			await this.publishRoomEvent(request, context, { videos });
 			for (const vid of videos) {
@@ -1432,6 +1476,7 @@ export class Room implements RoomState {
 		await this.publish({ action: "sync", playbackPosition: this.realPlaybackPosition });
 		await this.syncUser(this.getUserInfo(user.id));
 		this.voice.publishState();
+		this.chatReactions.sendAllTo(user.id);
 	}
 
 	public async leaveRoom(request: LeaveRequest, context: RoomRequestContext): Promise<void> {
@@ -1440,6 +1485,7 @@ export class Room implements RoomState {
 		}
 		const removed = this.getUserInfo(context.clientId);
 		this.lastReactionAt.delete(context.clientId);
+		this.chatReactions.forgetClient(context.clientId);
 		this.voice.leave(context.clientId);
 		// We must publish the event before removing the user, otherwise publishing the event will fail because the user is gone.
 		await this.publishRoomEvent(request, context, { user: removed });
@@ -1484,9 +1530,19 @@ export class Room implements RoomState {
 		const user = this.getUserInfo(context.clientId);
 		await this.publish({
 			action: "chat",
+			id: this.chatReactions.addMessage(),
 			from: user,
 			text: request.text,
 		});
+	}
+
+	public async reactToChat(
+		request: ChatReactionRequest,
+		context: RoomRequestContext,
+	): Promise<void> {
+		if (context.clientId !== undefined) {
+			this.chatReactions.setReaction(context.clientId, request);
+		}
 	}
 
 	public async react(request: ReactionRequest, context: RoomRequestContext): Promise<void> {
@@ -1561,54 +1617,7 @@ export class Room implements RoomState {
 	}
 
 	public async undo(request: UndoRequest, context: RoomRequestContext): Promise<void> {
-		// FIXME: room event type definitions suck ass, and needs to be reworked
-		switch (request.event.request.type) {
-			case RoomRequestType.SeekRequest:
-				if (request.event.additional.prevPosition) {
-					await this.processRequest(
-						{
-							type: request.event.request.type,
-							value: request.event.additional.prevPosition,
-						},
-						context,
-					);
-				}
-				break;
-			case RoomRequestType.SkipRequest:
-				if (this.currentSource) {
-					this.queue.pushTop(this.currentSource);
-				}
-				if (request.event.additional.video && request.event.additional.prevPosition) {
-					this.currentSource = request.event.additional.video;
-					this.playbackPosition = request.event.additional.prevPosition;
-				}
-				break;
-			case RoomRequestType.AddRequest:
-				if (this.queue.length > 0 && request.event.request.video) {
-					const removeReq: RemoveRequest = {
-						type: RoomRequestType.RemoveRequest,
-						video: request.event.request.video,
-					};
-					await this.processRequest(removeReq, context);
-				} else {
-					this.currentSource = null;
-				}
-				break;
-			case RoomRequestType.RemoveRequest:
-				if (
-					request.event.additional.video &&
-					request.event.additional.queueIdx !== undefined
-				) {
-					this.queue.insert(
-						request.event.additional.video,
-						request.event.additional.queueIdx,
-					);
-				}
-				break;
-			default:
-				this.log.error(`Event ${request.event.request.type} is not undoable, ignoring`);
-				break;
-		}
+		await this.undoableEvents.undo(request.eventId, context);
 	}
 
 	public async vote(request: VoteRequest, context: RoomRequestContext): Promise<void> {
@@ -1655,8 +1664,11 @@ export class Room implements RoomState {
 			case Role.TrustedUser:
 				perm = "manage-users.promote-trusted-user";
 				break;
-			default:
+			case Role.RegisteredUser:
+			case Role.UnregisteredUser:
 				break;
+			default:
+				throw new ImpossiblePromotionException();
 		}
 		if (perm) {
 			this.grants.check(context.role, perm);
@@ -1924,7 +1936,7 @@ export class Room implements RoomState {
 		}
 		if (canKickUser(context.role, this.getRole(user))) {
 			this.log.info(`${context.username} is kicking ${user.username}`);
-			this.command({ type: "kick", clientId: request.clientId });
+			await this.command({ type: "kick", clientId: request.clientId });
 		} else {
 			this.log.warn(
 				`${context.username} tried to kick ${user.username} but failed the role check`,

@@ -89,6 +89,19 @@ export interface MediaPlayerWithPlaybackRate extends MediaPlayer {
 	setPlaybackRate(rate: number): void;
 }
 
+/**
+ * A player that can drift back into step with the room by playing very slightly fast or slow.
+ * Only for players that take any rate: the YouTube and Vimeo APIs offer a fixed few.
+ */
+export interface MediaPlayerWithSyncRate extends MediaPlayer {
+	/** The rate to play at for now. The room's speed, shown in the controls, is unaffected. */
+	setSyncRate(rate: number): void;
+	/** Has landed from any seek and has data to show. */
+	isSettled(): boolean;
+	/** Is really playing at the moment, not paused, seeking or buffering. */
+	canAdjustRate(): boolean;
+}
+
 export interface MediaPlayerWithQuality extends MediaPlayer {
 	getVideoTracks(): VideoTrack[];
 	setVideoTrack(idx: number): void;
@@ -160,6 +173,14 @@ export class MediaPlayerV2 {
 			return;
 		}
 		this.player.value.setPosition(position);
+	}
+	/** The player, once it is ready, if it can drift back into step by changing its rate. */
+	getSyncRatePlayer(): MediaPlayerWithSyncRate | null {
+		const player = this.player.value;
+		if (!this.checkForPlayer(player) || !("setSyncRate" in player)) {
+			return null;
+		}
+		return player as MediaPlayerWithSyncRate;
 	}
 }
 

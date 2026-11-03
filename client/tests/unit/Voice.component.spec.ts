@@ -621,4 +621,23 @@ describe("voice", () => {
 			});
 		});
 	});
+
+	describe("device icons", () => {
+		it("shows each person's type in the roster with a label, and nothing when unknown", async () => {
+			const { wrapper, store, connection } = setup();
+			Object.assign(store.state.users.users.get("mom") ?? {}, { device: "phone" });
+			Object.assign(store.state.users.users.get("me") ?? {}, { device: "computer" });
+			connection.mockReceive(voiceMsg(["me", "mom", "sis"]));
+			await flush();
+			const icons = wrapper.findAll('[data-cy="device-icon"]');
+			expect(icons.map(icon => icon.attributes("data-device"))).toEqual([
+				"computer",
+				"phone",
+			]);
+			expect(icons[1].attributes("aria-label")).toBe("On a phone");
+			// Names are unchanged, and tapping a name still means the name.
+			expect(wrapper.get('[data-cy="voice-roster"]').text()).toContain("Mom");
+			expect(wrapper.findAll('[data-cy="voice-person"]')).toHaveLength(2);
+		});
+	});
 });
