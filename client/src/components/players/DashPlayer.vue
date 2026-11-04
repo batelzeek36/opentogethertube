@@ -1,6 +1,7 @@
 <template>
 	<div class="dash">
 		<video
+			playsinline
 			id="dashplayer"
 			preload="auto"
 			crossorigin="anonymous"

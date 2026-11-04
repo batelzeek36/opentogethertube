@@ -1,6 +1,7 @@
 <template>
 	<div class="hls">
 		<video
+			playsinline
 			id="hlsplayer"
 			preload="auto"
 			crossorigin="anonymous"
