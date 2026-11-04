@@ -1,0 +1,52 @@
+#!/bin/bash
+# Movie night network priority on the host's uplink (enp3s0).
+# House upload measured ~256 Mbit/s on 2026-11-03. Internet-bound traffic is capped just under it (CAP) so the
+# queue forms here, where traffic from sockets in movie.slice always goes first. LAN traffic is not capped.
+# Undo: movie-qos stop
+set -euo pipefail
+DEV=enp3s0
+CAP=${MOVIE_QOS_CAP:-220mbit}
+case "${1:-start}" in
+start)
+  "$0" stop
+  tc qdisc add dev $DEV root handle 1: htb default 20
+  tc class add dev $DEV parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit
+  tc class add dev $DEV parent 1:1 classid 1:20 htb rate 700mbit ceil 1000mbit prio 2
+  tc class add dev $DEV parent 1:1 classid 1:2 htb rate $CAP ceil $CAP
+  tc class add dev $DEV parent 1:2 classid 1:10 htb rate 100mbit ceil $CAP prio 0
+  tc class add dev $DEV parent 1:2 classid 1:30 htb rate 20mbit ceil $CAP prio 1
+  for c in 10 20 30; do tc qdisc add dev $DEV parent 1:$c handle $c: fq_codel; done
+  tc filter add dev $DEV parent 1: protocol all prio 1 handle 0x10 fw classid 1:10
+  tc filter add dev $DEV parent 1: protocol all prio 2 handle 0x30 fw classid 1:30
+  nft -f - <<'NFT'
+table inet movieqos
+delete table inet movieqos
+table inet movieqos {
+  # Local sockets in movie.slice (the tunnel) are marked where the socket is still known.
+  chain out {
+    type filter hook output priority mangle; policy accept;
+    oifname != "enp3s0" return
+    socket cgroupv2 level 1 "movie.slice" meta mark set 0x10
+  }
+  # Everything else leaving for the internet is ordinary; LAN and local ranges stay unmarked (not capped).
+  chain post {
+    type filter hook postrouting priority mangle; policy accept;
+    oifname != "enp3s0" return
+    meta mark 0x10 return
+    ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4, 255.255.255.255 } return
+    ip6 daddr { fe80::/10, fc00::/7, ff00::/8 } return
+    meta mark set 0x30
+  }
+}
+NFT
+  ;;
+stop)
+  tc qdisc del dev $DEV root 2>/dev/null || true
+  nft delete table inet movieqos 2>/dev/null || true
+  ;;
+status)
+  tc -s class show dev $DEV
+  nft list table inet movieqos
+  ;;
+*) echo "usage: movie-qos start|stop|status" >&2; exit 2 ;;
+esac

@@ -1,0 +1,9 @@
+[Unit]
+Description=Movie night (watch.example.com): first claim on CPU, disk and memory over everything else on the host
+Documentation=https://github.com/batelzeek36/opentogethertube/blob/master/docs/movie-night.md
+
+[Slice]
+# Default for user.slice and system.slice is 100: under contention this group wins about 98 to 2.
+CPUWeight=10000
+IOWeight=10000
+MemoryMin=4G

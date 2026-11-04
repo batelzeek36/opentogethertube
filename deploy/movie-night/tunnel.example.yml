@@ -1,0 +1,14 @@
+# cloudflared config for a locally managed named tunnel. Copy to ~/movie-night/tunnel.yml and fill in.
+# One hostname serves both the site and the movie files, so file links survive restarts (no quick tunnel).
+tunnel: YOUR-TUNNEL-UUID
+credentials-file: /home/YOUR_USER/movie-night/tunnel-creds.json
+no-autoupdate: true
+ingress:
+  # Movie files (serve.mjs). The path is the private token from route.txt.
+  - hostname: watch.example.com
+    path: ^/YOUR-TOKEN/
+    service: http://127.0.0.1:8977
+  # The OpenTogetherTube site.
+  - hostname: watch.example.com
+    service: http://127.0.0.1:8978
+  - service: http_status:404

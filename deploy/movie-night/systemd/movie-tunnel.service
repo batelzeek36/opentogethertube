@@ -1,0 +1,18 @@
+[Unit]
+Description=Movie night tunnel (watch.example.com: the site and the movie files)
+After=network-online.target movie-serve.service
+Wants=network-online.target
+
+[Service]
+Slice=movie.slice
+User=YOUR_USER
+Group=YOUR_USER
+Environment=HOME=/home/YOUR_USER
+ExecStart=/home/YOUR_USER/bin/cloudflared --no-autoupdate --config /home/YOUR_USER/movie-night/tunnel.yml tunnel run
+# Root re-applies the network priority once this group exists (the rule matches the group by its live id). The leading - means a failure there never stops the tunnel.
+ExecStartPost=-+/usr/local/sbin/movie-qos start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
