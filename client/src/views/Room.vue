@@ -73,7 +73,7 @@
 						></div>
 						<div
 							class="typing-chat pointer-events-none absolute bottom-20 right-0 h-[70%] min-h-17.5 w-100 px-2.5 py-1.25 max-lg:w-62.5"
-							v-if="controlsMode === 'in-video'"
+							v-if="controlsMode === 'in-video' || (pageFullscreen && !movieOnly)"
 						>
 							<Chat ref="chat" @link-click="setAddPreviewText" />
 						</div>
@@ -311,6 +311,7 @@ import { useMovieOnly } from "@/components/composables/movie-only";
 import {
 	elementFullscreenAvailable,
 	exitPageFullscreen,
+	pageFullscreenActive,
 	useFullscreen,
 } from "@/components/composables/fullscreen";
 import MovieOnlyButton from "@/components/MovieOnlyButton.vue";
@@ -753,6 +754,15 @@ export default defineComponent({
 			if (active) {
 				return;
 			}
+			// Movie only leaves the browser's fullscreen matching how the phone is held now, so the
+			// room's stand-in for it on an iPhone does the same. Rotation is ignored until here.
+			if (isMobile.value && !elementFullscreenAvailable() && orientation.orientation.value) {
+				if (orientation.orientation.value.startsWith("landscape")) {
+					fullscreen.enterPage();
+				} else {
+					fullscreen.exit();
+				}
+			}
 			if (store.state.room.isPlaying) {
 				activateVideoControls();
 			} else {
@@ -935,6 +945,7 @@ export default defineComponent({
 			controlsVisible,
 			typingView,
 			typingStyle,
+			pageFullscreen: pageFullscreenActive,
 			movieOnly: movieOnly.active,
 			movieOnlyRevealed: movieOnly.revealed,
 			movieOnlyRevealedByKey: movieOnly.revealedByKey,
