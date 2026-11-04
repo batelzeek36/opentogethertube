@@ -37,7 +37,7 @@
 			<Button
 				variant="ghost"
 				size="icon"
-				class="media-control"
+				class="media-control fullscreen-toggle"
 				:aria-label="$t('room.toggle-fullscreen')"
 				@click="toggleFullscreen()"
 			>
