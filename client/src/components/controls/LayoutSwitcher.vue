@@ -56,6 +56,7 @@ import { mdiSquareOutline, mdiFullscreenExit } from "@mdi/js";
 import { computed, onMounted, shallowRef } from "vue";
 import { useStore } from "@/store";
 import { RoomLayoutMode } from "@/stores/settings";
+import { useFullscreen } from "@/components/composables/fullscreen";
 import { useRoomKeyboardShortcuts } from "@/util/keyboard-shortcuts";
 
 const store = useStore();
@@ -65,17 +66,16 @@ const isMobile = computed(() => {
 	return window.matchMedia("only screen and (max-width: 760px)").matches;
 });
 
+const fullscreen = useFullscreen(store);
+
 function toggleFullscreen() {
-	if (document.fullscreenElement) {
-		document.exitFullscreen();
-	} else {
-		document.documentElement.requestFullscreen();
-		if (isMobile.value) {
-			// force the device into landscape mode to get the user to rotate the device
-			// but still allow exiting fullscreen by rotating the device back to portrait
-			if (screen.orientation) {
-				screen.orientation.lock("landscape").then(() => screen.orientation.unlock());
-			}
+	// An iPhone gets the room filling the page instead: it has no fullscreen for a page.
+	const entered = fullscreen.toggle();
+	if (entered === "element" && isMobile.value) {
+		// force the device into landscape mode to get the user to rotate the device
+		// but still allow exiting fullscreen by rotating the device back to portrait
+		if (screen.orientation) {
+			screen.orientation.lock("landscape").then(() => screen.orientation.unlock());
 		}
 	}
 }

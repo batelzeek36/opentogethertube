@@ -48,7 +48,7 @@
 				</div>
 			</div>
 			<div
-				class="grid w-full grid-cols-[1fr_auto] grid-rows-[minmax(400px,70vh)] max-lg:grid-cols-1 group-data-[fullscreen=true]/room:m-0 group-data-[fullscreen=true]/room:block group-data-[fullscreen=true]/room:h-screen group-data-[fullscreen=true]/room:max-h-screen group-data-[fullscreen=true]/room:w-screen group-data-[fullscreen=true]/room:aspect-[inherit] group-data-[layout=theater]/room:grid-rows-[minmax(400px,85vh)]"
+				class="fullscreen-frame grid w-full grid-cols-[1fr_auto] grid-rows-[minmax(400px,70vh)] max-lg:grid-cols-1 group-data-[fullscreen=true]/room:m-0 group-data-[fullscreen=true]/room:block group-data-[fullscreen=true]/room:h-screen group-data-[fullscreen=true]/room:max-h-screen group-data-[fullscreen=true]/room:w-screen group-data-[fullscreen=true]/room:aspect-[inherit] group-data-[layout=theater]/room:grid-rows-[minmax(400px,85vh)]"
 			>
 				<div
 					class="relative z-31 flex h-full flex-col group-data-[fullscreen=true]/room:max-h-screen group-data-[fullscreen=true]/room:w-full! group-data-[fullscreen=true]/room:p-0 group-data-[layout=default]/room:w-4/5 group-data-[layout=default]/room:justify-self-center group-data-[layout=default]/room:max-xl:w-full"
@@ -56,7 +56,7 @@
 					:style="typingStyle"
 				>
 					<div
-						class="movie-only-player size-full group-data-[fullscreen=true]/room:h-screen"
+						class="movie-only-player fullscreen-player size-full group-data-[fullscreen=true]/room:h-screen"
 						ref="playerContainer"
 					>
 						<OmniPlayer
@@ -308,6 +308,11 @@ import Chat from "@/components/Chat.vue";
 import ReactionBar from "@/components/ReactionBar.vue";
 import { useTypingView } from "@/components/composables/typing-view";
 import { useMovieOnly } from "@/components/composables/movie-only";
+import {
+	elementFullscreenAvailable,
+	exitPageFullscreen,
+	useFullscreen,
+} from "@/components/composables/fullscreen";
 import MovieOnlyButton from "@/components/MovieOnlyButton.vue";
 import MovieOnlyLayer from "@/components/MovieOnlyLayer.vue";
 import ReactionOverlay from "@/components/ReactionOverlay.vue";
@@ -735,6 +740,7 @@ export default defineComponent({
 			() => window.matchMedia("only screen and (max-width: 760px)").matches,
 		);
 		const orientation = useScreenOrientation();
+		const fullscreen = useFullscreen(store);
 		const movieOnly = useMovieOnly({ followsRotation: () => isMobile.value });
 		// Being kicked replaces the room with a message that has to be read.
 		watch(showDisconnectedOverlay, disconnected => {
@@ -767,15 +773,23 @@ export default defineComponent({
 				}
 				if (isMobile.value) {
 					if (newOrientation.startsWith("landscape")) {
+						if (!elementFullscreenAvailable()) {
+							// An iPhone has no fullscreen for a page: the room fills it instead.
+							fullscreen.enterPage();
+							return;
+						}
 						// this promise is rejected if the fullscreen request is denied
 						await document.documentElement.requestFullscreen();
 						window.scrollTo({ top: 0, behavior: "smooth" });
 					} else {
-						document.exitFullscreen();
+						fullscreen.exit();
 					}
 				}
 			});
 		});
+
+		// The header and footer come back with the rest of the site.
+		onUnmounted(() => exitPageFullscreen());
 
 		watch(queueTab, async newTab => {
 			if (roomSettingsForm.value && newTab === "settings") {
@@ -985,6 +999,34 @@ export default defineComponent({
 	left: 10px;
 	bottom: 130px;
 	z-index: 40;
+}
+
+/*
+ * Page fullscreen: where the browser has no fullscreen for a page (iPhone), the room's fullscreen
+ * layout fills the visible screen itself. 100vh would reach under the browser's bars, so the frame
+ * is pinned to what is visible, inside the notch and the home bar. See useFullscreen.
+ */
+html.page-fullscreen,
+html.page-fullscreen body {
+	overflow: hidden !important;
+	overscroll-behavior: none;
+	background: #000 !important;
+}
+
+html.page-fullscreen .fullscreen-frame {
+	position: fixed;
+	inset: 0;
+	z-index: 45;
+	width: auto;
+	height: auto;
+	max-height: none;
+	padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+		env(safe-area-inset-left);
+	background: #000;
+}
+
+html.page-fullscreen .fullscreen-player {
+	height: 100%;
 }
 
 /* The whole movie frame and the chat, in the space above a phone's keyboard. See useTypingView. */
