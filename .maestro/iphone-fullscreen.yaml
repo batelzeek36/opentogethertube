@@ -1,0 +1,76 @@
+# The room's fullscreen on an iPhone, where the browser has no fullscreen for a page. Safari in the
+# iOS Simulator: Chrome and Brave on an iPhone run the same WebKit. Use a test room, never a live one.
+#
+#   ~/.maestro/bin/maestro --device <udid> test \
+#     -e ROOM_URL=http://localhost:<port>/room/<test-room> \
+#     -e SHOTS=<absolute-dir-for-screenshots> \
+#     .maestro/iphone-fullscreen.yaml
+appId: com.apple.mobilesafari
+---
+- setOrientation: PORTRAIT
+- launchApp
+- openLink: ${ROOM_URL}
+- extendedWaitUntil:
+    visible: "Toggle fullscreen"
+    timeout: 30000
+- takeScreenshot: ${SHOTS}/01-portrait-before
+
+# Portrait: the button turns the layout on, and the page's header goes away.
+- tapOn: "Toggle fullscreen"
+- extendedWaitUntil:
+    notVisible: "OpenTogetherTube"
+    timeout: 5000
+- takeScreenshot: ${SHOTS}/02-portrait-fullscreen
+
+# A reaction floats up from the bar.
+- tapOn: "React with 🔥"
+- takeScreenshot: ${SHOTS}/03-portrait-reaction
+
+# Chat opens over the movie, and typing works with the on-screen keyboard.
+- tapOn: "Open chat"
+- extendedWaitUntil:
+    visible: "Type your message here..."
+    timeout: 5000
+- tapOn: "Type your message here..."
+- inputText: "iphone fullscreen portrait"
+- takeScreenshot: ${SHOTS}/04-portrait-typing
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "iphone fullscreen portrait"
+    timeout: 5000
+- takeScreenshot: ${SHOTS}/05-portrait-sent
+
+# The same button leaves, and the page is back.
+- tapOn: "Toggle fullscreen"
+- extendedWaitUntil:
+    visible: "OpenTogetherTube"
+    timeout: 5000
+- takeScreenshot: ${SHOTS}/06-portrait-after
+
+# Landscape: turning the phone sideways goes in by itself, as it does on Android.
+- setOrientation: LANDSCAPE_LEFT
+- extendedWaitUntil:
+    notVisible: "OpenTogetherTube"
+    timeout: 5000
+- takeScreenshot: ${SHOTS}/07-landscape-fullscreen
+- tapOn: "React with 🔥"
+- takeScreenshot: ${SHOTS}/08-landscape-reaction
+- tapOn: "Open chat"
+- extendedWaitUntil:
+    visible: "Type your message here..."
+    timeout: 5000
+- tapOn: "Type your message here..."
+- inputText: "iphone fullscreen landscape"
+- takeScreenshot: ${SHOTS}/09-landscape-typing
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "iphone fullscreen landscape"
+    timeout: 5000
+- takeScreenshot: ${SHOTS}/10-landscape-sent
+
+# Turning back upright leaves.
+- setOrientation: PORTRAIT
+- extendedWaitUntil:
+    visible: "OpenTogetherTube"
+    timeout: 5000
+- takeScreenshot: ${SHOTS}/11-portrait-after-rotating

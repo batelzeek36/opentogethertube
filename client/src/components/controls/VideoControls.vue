@@ -9,7 +9,7 @@
 			}"
 		>
 			<VideoProgressSlider :current-position="sliderPosition" />
-			<div class="controls-row2">
+			<div class="controls-row2" :class="{ 'pinned-fullscreen': pinFullscreen }">
 				<BasicControls :current-position="truePosition" />
 				<VolumeControl />
 				<TimestampDisplay :current-position="truePosition" data-cy="timestamp-display" />
@@ -34,6 +34,7 @@ import VolumeControl from "./VolumeControl.vue";
 import PlaybackRateSwitcher from "./PlaybackRateSwitcher.vue";
 import VideoSettings from "./VideoSettings.vue";
 import PictureInPictureButton from "./PictureInPictureButton.vue";
+import { elementFullscreenAvailable } from "@/components/composables/fullscreen";
 
 withDefaults(
 	defineProps<{
@@ -47,6 +48,9 @@ withDefaults(
 		mode: "in-video",
 	},
 );
+
+/** Without a browser fullscreen this row's button is the only way in, so it has to stay on screen. */
+const pinFullscreen = !elementFullscreenAvailable();
 </script>
 
 <!-- biome-ignore lint/nursery/useScopedStyles: biome migration -->
@@ -96,6 +100,22 @@ withDefaults(
 	.controls-row2 {
 		display: flex;
 		align-items: center;
+	}
+
+	// An iPhone's row is wider than its screen: the rest scrolls sideways under the fullscreen button.
+	@media (max-width: 760px) {
+		.controls-row2.pinned-fullscreen {
+			overflow-x: auto;
+			scrollbar-width: none;
+
+			.fullscreen-toggle {
+				position: sticky;
+				right: 0;
+				border-radius: 999px;
+				background: rgb(0 0 0 / 55%);
+				backdrop-filter: blur(6px);
+			}
+		}
 	}
 }
 </style>

@@ -225,6 +225,7 @@ import { useRouter } from "vue-router";
 import logoUrl from "@/assets/logo.svg";
 import { useStore } from "@/store";
 import LocaleSelector from "@/components/navbar/LocaleSelector.vue";
+import { isFullscreen } from "@/components/composables/fullscreen";
 
 // biome-ignore lint/style/noVueOptionsApi: TODO: convert to setup
 const App = defineComponent({
@@ -301,7 +302,8 @@ const App = defineComponent({
 					store.commit("SET_FULLSCREEN", true);
 					document.querySelector("html")?.classList.add("scrollbarBeGone");
 				} else {
-					store.commit("SET_FULLSCREEN", false);
+					// The room may still be filling the page where the browser had no fullscreen.
+					store.commit("SET_FULLSCREEN", isFullscreen());
 					document.querySelector("html")?.classList.remove("scrollbarBeGone");
 				}
 			});

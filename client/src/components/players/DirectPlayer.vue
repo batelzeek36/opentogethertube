@@ -1,6 +1,7 @@
 <template>
 	<div class="direct">
 		<video
+			playsinline
 			ref="videoElem"
 			preload="auto"
 			crossorigin="anonymous"
