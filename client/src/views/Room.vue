@@ -54,6 +54,7 @@
 					class="relative z-31 flex h-full flex-col group-data-[fullscreen=true]/room:max-h-screen group-data-[fullscreen=true]/room:w-full! group-data-[fullscreen=true]/room:p-0 group-data-[layout=default]/room:w-4/5 group-data-[layout=default]/room:justify-self-center group-data-[layout=default]/room:max-xl:w-full"
 					:class="{ 'typing-view': typingView, 'movie-only-stage': movieOnly }"
 					:style="typingStyle"
+					@click.capture="onStageClick"
 				>
 					<div
 						class="movie-only-player fullscreen-player size-full group-data-[fullscreen=true]/room:h-screen"
@@ -73,6 +74,7 @@
 						></div>
 						<div
 							class="typing-chat pointer-events-none absolute bottom-20 right-0 h-[70%] min-h-17.5 w-100 px-2.5 py-1.25 max-lg:w-62.5"
+							data-stays-on-screen
 							v-if="controlsMode === 'in-video' || (pageFullscreen && !movieOnly)"
 						>
 							<Chat ref="chat" @link-click="setAddPreviewText" />
@@ -336,6 +338,8 @@ import { useI18n } from "vue-i18n";
 import { useRouter, useRoute } from "vue-router";
 import type { ServerMessageSync } from "ott-common/models/messages";
 import { useScreenOrientation, useMouseInElement } from "@vueuse/core";
+import { iosTapFilter, staysOnScreen } from "@/components/composables/ios-taps";
+import { isIos } from "@/util/device-type";
 import { KeyboardShortcuts, RoomKeyboardShortcutsKey } from "@/util/keyboard-shortcuts";
 import VideoControls from "@/components/controls/VideoControls.vue";
 import RestoreQueue from "@/components/RestoreQueue.vue";
@@ -409,7 +413,8 @@ export default defineComponent({
 		const controlsVisible = ref(true);
 		const videoControlsHideTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
 		const playerContainer = useTemplateRef<HTMLDivElement>("playerContainer");
-		const mouse = useMouseInElement(playerContainer);
+		const ios = isIos();
+		const mouse = useMouseInElement(playerContainer, ios ? { eventFilter: iosTapFilter } : {});
 		const isIframeBasedPlayer = ref(false);
 
 		function setVideoControlsVisibility(visible: boolean) {
@@ -431,7 +436,7 @@ export default defineComponent({
 			}
 		}
 
-		watch([mouse.x, mouse.y], () => {
+		function onPointerActivity() {
 			if (!store.state.room.isPlaying) {
 				setVideoControlsVisibility(true);
 				return;
@@ -443,7 +448,15 @@ export default defineComponent({
 			}
 
 			activateVideoControls();
-		});
+		}
+		watch([mouse.x, mouse.y], onPointerActivity);
+
+		/** A tap on the very spot of the last touch moves nothing, so the watcher never hears of it. */
+		function onStageClick(e: MouseEvent) {
+			if (ios && !staysOnScreen(e.target)) {
+				onPointerActivity();
+			}
+		}
 
 		const controlsMode = computed(() =>
 			currentSource.value?.service === "youtube" ? "outside-video" : "in-video",
@@ -947,6 +960,7 @@ export default defineComponent({
 			isOfficialSite,
 
 			controlsVisible,
+			onStageClick,
 			typingView,
 			typingStyle,
 			pageFullscreen: pageFullscreenActive,
