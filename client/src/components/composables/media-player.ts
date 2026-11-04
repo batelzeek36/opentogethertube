@@ -100,6 +100,8 @@ export interface MediaPlayerWithSyncRate extends MediaPlayer {
 	isSettled(): boolean;
 	/** Is really playing at the moment, not paused, seeking or buffering. */
 	canAdjustRate(): boolean;
+	/** Seeking isn't keeping this player with the room, so it should ask less of itself if it can. */
+	noteSyncTrouble(): void;
 }
 
 export interface MediaPlayerWithQuality extends MediaPlayer {

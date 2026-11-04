@@ -106,7 +106,8 @@ export function deviceMaxQuality(device: DeviceInfo): number {
 }
 
 export function currentDeviceInfo(): DeviceInfo {
-	const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+	const connection = (navigator as Navigator & { connection?: { saveData?: boolean } })
+		.connection;
 	return {
 		screenShortSide: Math.min(screen.width, screen.height),
 		coarsePointer: window.matchMedia("(pointer: coarse)").matches,

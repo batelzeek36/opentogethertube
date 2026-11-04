@@ -504,6 +504,10 @@ function canAdjustRate(): boolean {
 	return !!video && !video.paused && !video.ended && isSettled();
 }
 
+function noteSyncTrouble(): void {
+	stepDownIfOnAuto();
+}
+
 function setAudioBoost(boost: number): void {
 	audioBoost.setBoost(boost);
 }
@@ -680,6 +684,7 @@ defineExpose({
 	setSyncRate,
 	isSettled,
 	canAdjustRate,
+	noteSyncTrouble,
 	setAudioBoost,
 } satisfies MediaPlayerWithCaptions & MediaPlayerWithPlaybackRate & MediaPlayerWithAudioBoost & MediaPlayerWithQuality & MediaPlayerWithSyncRate);
 </script>
