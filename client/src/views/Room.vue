@@ -1126,6 +1126,16 @@ html.page-fullscreen .fullscreen-player {
 	padding-right: 34px;
 }
 
+/*
+ * iOS zooms the page in on a field under 16px and leaves it zoomed after the keyboard goes, with the
+ * controls off the edge. The field is 14px from 768px wide, which a big iPhone reaches sideways.
+ */
+@supports (-webkit-touch-callout: none) {
+	.typing-view .input-box input {
+		font-size: 16px;
+	}
+}
+
 @media (orientation: portrait) {
 	.typing-view > div:first-child {
 		display: flex;
