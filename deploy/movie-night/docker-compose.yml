@@ -1,0 +1,42 @@
+# Private OpenTogetherTube for movie night, built from the fork. Reached only through a tunnel to 127.0.0.1:8978.
+name: movie-night-ott
+services:
+  ott:
+    build:
+      context: ../..   # this repository
+      dockerfile: deploy/monolith.Dockerfile
+      target: docker-stage
+    environment:
+      - PORT=8080
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - FFPROBE_PATH=/usr/bin/ffprobe
+      - POSTGRES_USER=ott
+      - POSTGRES_DB=ott
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - OPENTOGETHERTUBE_API_KEY=${OTT_API_KEY}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - YOUTUBE_API_KEY=not-used-direct-files-only
+      - DOCKER=1
+    volumes:
+      - ./env:/app/env
+    ports:
+      - 127.0.0.1:8978:8080
+    depends_on: [redis, postgres]
+    restart: unless-stopped
+    cgroup_parent: movie.slice
+  redis:
+    image: redis
+    expose: ["6379"]
+    restart: unless-stopped
+    cgroup_parent: movie.slice
+  postgres:
+    image: postgres:15-bullseye
+    environment:
+      - POSTGRES_DB=ott
+      - POSTGRES_USER=ott
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    expose: ["5432"]
+    restart: unless-stopped
+    cgroup_parent: movie.slice

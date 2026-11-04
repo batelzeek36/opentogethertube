@@ -1,0 +1,56 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Codec lab</title>
+<style>body{background:#111;color:#eee;font:15px/1.4 system-ui,sans-serif;margin:12px}h1{font-size:18px;margin:0 0 8px}
+pre{white-space:pre-wrap;font-size:13px;background:#000;padding:8px;margin:6px 0}video{width:100%;max-height:45vh;background:#000}
+.ok{color:#7f7}.no{color:#f77}</style></head><body>
+<h1>Codec lab</h1>
+<video id="v" muted playsinline preload="auto"></video>
+<pre id="out">running...</pre>
+<script>
+const out = document.getElementById('out'), v = document.getElementById('v');
+const lines = [], report = { ua: navigator.userAgent, screen: [screen.width, screen.height, devicePixelRatio], hdrScreen: matchMedia('(dynamic-range: high)').matches, caps: {}, clips: {} };
+const log = (s) => { lines.push(s); out.textContent = lines.join('\n'); };
+const vcfg = { contentType: 'video/mp4; codecs="hvc1.2.4.L153.B0"', width: 3836, height: 2072, bitrate: 27000000, framerate: 24, transferFunction: 'pq', colorGamut: 'rec2020', hdrMetadataType: 'smpteSt2086' };
+const acodecs = { aac: 'mp4a.40.2', flac: 'flac', eac3: 'ec-3' };
+async function caps() {
+  log('HDR screen: ' + report.hdrScreen + ' | screen ' + report.screen.join('x'));
+  for (const [k, s] of Object.entries({ hevc: 'video/mp4; codecs="hvc1.2.4.L153.B0"', dv: 'video/mp4; codecs="dvh1.08.06"', aac: 'audio/mp4; codecs="mp4a.40.2"', flac: 'audio/mp4; codecs="flac"', eac3: 'audio/mp4; codecs="ec-3"' })) {
+    report.caps[k] = { canPlay: v.canPlayType(s) };
+  }
+  try { const r = await navigator.mediaCapabilities.decodingInfo({ type: 'file', video: vcfg }); report.caps.hevc.mc = r; }
+  catch (e) { report.caps.hevc.mc = 'err ' + e.message; }
+  try { const r = await navigator.mediaCapabilities.decodingInfo({ type: 'file', video: { ...vcfg, transferFunction: undefined, colorGamut: undefined, hdrMetadataType: undefined } }); report.caps.hevcSdrQuery = r; } catch (e) {}
+  for (const [k, c] of Object.entries(acodecs)) {
+    try { report.caps[k].mc = await navigator.mediaCapabilities.decodingInfo({ type: 'file', audio: { contentType: `audio/mp4; codecs="${c}"`, channels: '6', bitrate: 640000, samplerate: 48000 } }); }
+    catch (e) { report.caps[k].mc = 'err ' + e.message; }
+  }
+  for (const [k, c] of Object.entries(report.caps)) log(k.padEnd(6) + ' canPlayType=' + JSON.stringify(c.canPlay ?? '') + (c.mc ? ' supported=' + (c.mc.supported ?? c.mc) + ' smooth=' + c.mc.smooth + ' powerEfficient=' + c.mc.powerEfficient : ''));
+}
+function run(name) {
+  return new Promise((resolve) => {
+    const r = { name };
+    v.src = name + '.mp4'; v.load();
+    const t0 = performance.now();
+    v.onerror = () => { r.error = v.error && (v.error.code + ' ' + v.error.message); };
+    v.play().catch((e) => { r.playErr = e.name + ': ' + e.message; });
+    setTimeout(() => {
+      const q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : {};
+      Object.assign(r, { readyState: v.readyState, t: +v.currentTime.toFixed(2), size: v.videoWidth + 'x' + v.videoHeight,
+        frames: q.totalVideoFrames, dropped: q.droppedVideoFrames, audioBytes: v.webkitAudioDecodedByteCount, mozHasAudio: v.mozHasAudio,
+        audioTracks: v.audioTracks ? v.audioTracks.length : undefined, buffered: v.buffered.length ? +v.buffered.end(0).toFixed(1) : 0, secs: +((performance.now() - t0) / 1000).toFixed(1) });
+      v.pause();
+      report.clips[name] = r;
+      const ok = !r.error && r.t > 5;
+      log((ok ? 'PLAYS ' : 'FAILS ') + name.padEnd(7) + ' t=' + r.t + 's size=' + r.size + ' frames=' + r.frames + ' dropped=' + r.dropped + ' audioBytes=' + r.audioBytes + ' mozHasAudio=' + r.mozHasAudio + (r.error ? ' error=' + r.error : '') + (r.playErr ? ' ' + r.playErr : ''));
+      resolve();
+    }, 15000);
+  });
+}
+(async () => {
+  await caps();
+  for (const n of ['a_aac', 'b_flac', 'c_eac3']) await run(n);
+  log('done');
+  fetch('report', { method: 'POST', body: JSON.stringify(report) });
+  v.src = "b_flac.mp4"; v.addEventListener("loadedmetadata", () => { v.currentTime = 30; }, { once: true });
+})();
+</script></body></html>
