@@ -499,7 +499,7 @@ export default defineComponent({
 				}
 				return;
 			}
-			const { seek, rate } = driftCorrector.step({
+			const { seek, rate, lead, struggling } = driftCorrector.step({
 				drift,
 				roomSpeed: store.state.room.playbackSpeed,
 				roomPlaying: store.state.room.isPlaying,
@@ -510,7 +510,11 @@ export default defineComponent({
 			});
 			syncRatePlayer.setSyncRate(rate);
 			if (seek) {
-				player.setPosition(newPosition);
+				const end = store.state.room.currentSource?.length ?? Number.POSITIVE_INFINITY;
+				player.setPosition(Math.min(newPosition + lead, end));
+			}
+			if (struggling) {
+				syncRatePlayer.noteSyncTrouble();
 			}
 		}
 

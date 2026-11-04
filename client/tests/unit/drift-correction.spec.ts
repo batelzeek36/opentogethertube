@@ -5,11 +5,13 @@ import {
 	ADJUST_UNTIL_SECONDS,
 	DriftCorrector,
 	type DriftInput,
+	SEEK_BACKOFF_MAX_MS,
 	SEEK_MIN_INTERVAL_MS,
 	SEEK_SETTLE_MS,
 } from "@/util/drift-correction";
 
 const TICK_MS = 250;
+const HOLD = { seek: false, lead: 0, struggling: false };
 
 /** A player with the given starting drift, ticked like the room does. */
 function simulate(options: {
@@ -65,14 +67,14 @@ describe("DriftCorrector", () => {
 
 	it("leaves a player alone when it is close", () => {
 		for (const drift of [0, 0.1, -0.1, ADJUST_FROM_SECONDS - 0.01]) {
-			expect(corrector.step(input({ drift }))).toEqual({ seek: false, rate: 1 });
+			expect(corrector.step(input({ drift }))).toEqual({ ...HOLD, rate: 1 });
 		}
 	});
 
 	it("speeds up when behind and slows down when ahead, without a seek", () => {
-		expect(corrector.step(input({ drift: 0.5 }))).toEqual({ seek: false, rate: 1.05 });
+		expect(corrector.step(input({ drift: 0.5 }))).toEqual({ ...HOLD, rate: 1.05 });
 		corrector.reset();
-		expect(corrector.step(input({ drift: -0.5 }))).toEqual({ seek: false, rate: 0.95 });
+		expect(corrector.step(input({ drift: -0.5 }))).toEqual({ ...HOLD, rate: 0.95 });
 	});
 
 	it("eases from either direction up to a full second off", () => {
@@ -81,9 +83,9 @@ describe("DriftCorrector", () => {
 	});
 
 	it("seeks above a second, at the room's speed", () => {
-		expect(corrector.step(input({ drift: 1.01 }))).toEqual({ seek: true, rate: 1 });
+		expect(corrector.step(input({ drift: 1.01 }))).toEqual({ ...HOLD, seek: true, rate: 1 });
 		corrector.reset();
-		expect(corrector.step(input({ drift: -5 }))).toEqual({ seek: true, rate: 1 });
+		expect(corrector.step(input({ drift: -5 }))).toEqual({ ...HOLD, seek: true, rate: 1 });
 	});
 
 	it.each([0.25, 0.5, 1, 1.5, 2])("scales with a room speed of %s", roomSpeed => {
@@ -105,15 +107,12 @@ describe("DriftCorrector", () => {
 			["when playback gets blocked", { blocked: true }],
 		])("%s", (_name, over) => {
 			expect(corrector.step(input({ drift: 0.5 })).rate).toBe(1.05);
-			expect(corrector.step(input({ drift: 0.5, ...over }))).toEqual({
-				seek: false,
-				rate: 1,
-			});
+			expect(corrector.step(input({ drift: 0.5, ...over }))).toEqual({ ...HOLD, rate: 1 });
 		});
 
 		it("when a seek takes over", () => {
 			expect(corrector.step(input({ drift: 0.5 })).rate).toBe(1.05);
-			expect(corrector.step(input({ drift: 2 }))).toEqual({ seek: true, rate: 1 });
+			expect(corrector.step(input({ drift: 2 }))).toEqual({ ...HOLD, seek: true, rate: 1 });
 		});
 
 		it("when caught up", () => {
@@ -156,7 +155,16 @@ describe("DriftCorrector", () => {
 		it("seeks again soon if the last one landed and the player is still far off", () => {
 			expect(corrector.step(input({ drift: 3, now: 0 })).seek).toBe(true);
 			expect(corrector.step(input({ drift: 3, now: TICK_MS })).seek).toBe(false);
-			expect(corrector.step(input({ drift: 3, now: SEEK_MIN_INTERVAL_MS })).seek).toBe(true);
+			const again = SEEK_MIN_INTERVAL_MS * 2;
+			expect(corrector.step(input({ drift: 3, now: again - TICK_MS })).seek).toBe(false);
+			expect(corrector.step(input({ drift: 3, now: again })).seek).toBe(true);
+		});
+
+		it("doesn't count a seek that landed in step as a miss", () => {
+			expect(corrector.step(input({ drift: 3, now: 0 })).seek).toBe(true);
+			corrector.step(input({ drift: 0, now: TICK_MS }));
+			const next = TICK_MS + SEEK_MIN_INTERVAL_MS;
+			expect(corrector.step(input({ drift: 3, now: next })).seek).toBe(true);
 		});
 
 		it("seeks at once when a seek is the first thing it has to do while buffering", () => {
@@ -167,6 +175,102 @@ describe("DriftCorrector", () => {
 			expect(corrector.step(input({ drift: 3, now: 0 })).seek).toBe(true);
 			corrector.reset();
 			expect(corrector.step(input({ drift: 3, now: TICK_MS })).seek).toBe(true);
+		});
+	});
+
+	describe("when seeks are slow to land", () => {
+		/**
+		 * A player that takes the given time to land every seek, in a room that keeps moving. Each
+		 * seek lands that long after it was aimed, so it arrives short by that much minus any lead.
+		 */
+		function run(landingMs: number, ticks = 400) {
+			const corrector = new DriftCorrector();
+			const seeks: { lead: number; struggling: boolean }[] = [];
+			let drift = 8;
+			let landsAt = Number.NEGATIVE_INFINITY;
+			for (let i = 0; i < ticks; i++) {
+				const now = i * TICK_MS;
+				const settled = now >= landsAt;
+				const step = corrector.step(input({ drift, settled, canAdjustRate: settled, now }));
+				if (step.seek) {
+					seeks.push({ lead: step.lead, struggling: step.struggling });
+					drift = landingMs / 1000 - step.lead;
+					landsAt = now + landingMs;
+				} else if (!settled) {
+					// Nothing to show yet: it isn't playing, so its reading isn't one to act on.
+				} else {
+					drift += ((1 - step.rate) * TICK_MS) / 1000;
+				}
+			}
+			return { seeks, drift };
+		}
+
+		it("is back in step after a second, better aimed seek", () => {
+			const { seeks, drift } = run(3000);
+			expect(seeks).toHaveLength(2);
+			expect(seeks[0].lead).toBe(0);
+			expect(seeks[1].lead).toBeGreaterThan(2.5);
+			expect(Math.abs(drift)).toBeLessThan(ADJUST_FROM_SECONDS);
+		});
+
+		it("needs only one seek when they land at once", () => {
+			const { seeks, drift } = run(0);
+			expect(seeks).toHaveLength(1);
+			expect(seeks[0].lead).toBe(0);
+			expect(drift).toBe(0);
+		});
+
+		it("stops re-seeking a player that never lands, instead of restarting it every 5 s", () => {
+			const corrector = new DriftCorrector();
+			const seekTimes: number[] = [];
+			for (let now = 0; now < 60_000; now += TICK_MS) {
+				if (corrector.step(input({ drift: 5, settled: false, now })).seek) {
+					seekTimes.push(now);
+				}
+			}
+			expect(seekTimes.slice(0, 3)).toEqual([0, SEEK_SETTLE_MS, SEEK_SETTLE_MS * 3]);
+			const gaps = seekTimes.slice(1).map((at, i) => at - seekTimes[i]);
+			expect(Math.max(...gaps)).toBe(SEEK_BACKOFF_MAX_MS);
+		});
+
+		it("aims a stranded player further ahead the longer it took", () => {
+			const corrector = new DriftCorrector();
+			corrector.step(input({ drift: 5, settled: false, now: 0 }));
+			const second = corrector.step(input({ drift: 5, settled: false, now: SEEK_SETTLE_MS }));
+			expect(second.seek).toBe(true);
+			expect(second.lead).toBe(SEEK_SETTLE_MS / 1000);
+		});
+
+		it("says so once seeking has failed twice in a row", () => {
+			const corrector = new DriftCorrector();
+			const seeks: boolean[] = [];
+			for (let now = 0; now < 40_000; now += TICK_MS) {
+				const step = corrector.step(input({ drift: 5, settled: false, now }));
+				if (step.seek) {
+					seeks.push(step.struggling);
+				}
+			}
+			expect(seeks.slice(0, 3)).toEqual([false, false, true]);
+		});
+
+		it("leaves a paused room's seek where it was aimed", () => {
+			const corrector = new DriftCorrector();
+			corrector.step(input({ drift: 5, settled: false, now: 0 }));
+			corrector.step(input({ drift: 5, settled: false, now: SEEK_SETTLE_MS }));
+			const paused = corrector.step(
+				input({ drift: 5, roomPlaying: false, now: SEEK_SETTLE_MS + TICK_MS }),
+			);
+			expect(paused.seek).toBe(true);
+			expect(paused.lead).toBe(0);
+		});
+
+		it("forgets all of it on a new video", () => {
+			const corrector = new DriftCorrector();
+			corrector.step(input({ drift: 5, settled: false, now: 0 }));
+			corrector.step(input({ drift: 5, settled: false, now: SEEK_SETTLE_MS }));
+			corrector.reset();
+			const step = corrector.step(input({ drift: 5, now: SEEK_SETTLE_MS + TICK_MS }));
+			expect(step).toEqual({ ...HOLD, seek: true, rate: 1 });
 		});
 	});
 

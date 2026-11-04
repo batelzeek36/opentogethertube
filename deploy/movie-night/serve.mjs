@@ -1,4 +1,4 @@
-// Serves every video in ~/movie-night/movies at /<token>/<slug>, with the Range requests iPhone Safari needs.
+// Serves every video and size manifest in ~/movie-night/movies at /<token>/<slug>, with the Range requests iPhone Safari needs.
 // route.txt holds "/<token>/" (a long random string); keep it private, it is the only thing guarding the files.
 // Drop a file in the folder and its link works at once; nothing else answers, and there is no listing.
 import fs from 'node:fs';
@@ -16,7 +16,7 @@ export const slug = (name) => name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9]
 function find(pathname) {
   const [, prefix, wanted, extra] = pathname.split('/');
   if (prefix !== token || !wanted || extra !== undefined) return null;
-  const name = fs.readdirSync(movies).find((f) => /\.(mp4|m4v|mov|webm)$/i.test(f) && slug(f) === wanted);
+  const name = fs.readdirSync(movies).find((f) => /\.(mp4|m4v|mov|webm|json)$/i.test(f) && slug(f) === wanted);
   return name ? path.join(movies, name) : null;
 }
 
@@ -27,7 +27,7 @@ http.createServer((req, res) => {
     return;
   }
   const size = fs.statSync(file).size;
-  const type = /\.webm$/i.test(file) ? 'video/webm' : 'video/mp4';
+  const type = /\.json$/i.test(file) ? 'application/json' : /\.webm$/i.test(file) ? 'video/webm' : 'video/mp4';
   const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' };
   const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
   if (!m || (m[1] === '' && m[2] === '')) {

@@ -8,7 +8,7 @@
 			@playing="onPlaying"
 			@pause="onPaused"
 			@play="onWaiting"
-			@waiting="onWaiting"
+			@waiting="onVideoWaiting"
 			@stalled="onBuffering"
 			@loadstart="onBuffering"
 			@progress="onProgress"
@@ -46,6 +46,19 @@ import type {
 	MediaPlayerWithSyncRate,
 } from "../composables";
 import { useCaptions, useMediaAudioBoost, useQualities } from "../composables";
+import {
+	currentDeviceInfo,
+	deviceMaxQuality,
+	loadQualityChoice,
+	loadRecentSpeed,
+	measureSpeed,
+	nextLowerSource,
+	pickAutoSource,
+	saveQualityChoice,
+	saveRecentSpeed,
+	sourceForHeight,
+	StallWatch,
+} from "@/util/direct-quality";
 
 interface Props {
 	service: string;
@@ -72,6 +85,14 @@ const captions = useCaptions();
 const audioBoost = useMediaAudioBoost(videoElem);
 const qualities = useQualities();
 const manifest = ref<CustomMediaManifest | null>(null);
+/** The manifest source playing right now, also while on Auto. */
+let activeSource = -1;
+let measuredSpeed: number | null = null;
+const stallWatch = new StallWatch();
+/** Bumped by each load, so one that was waiting on the speed check knows it was replaced. */
+let loadGeneration = 0;
+/** Undoes the "resume here" waiting on a file that was switched away from before it loaded. */
+let pendingResume: AbortController | null = null;
 
 // kept outside subtitleSources's computed() factory to dodge a noVueRefAsOperand false
 // positive: biome's nursery rule flags property access on nested callback params when the
@@ -329,25 +350,109 @@ function setVideoTrack(idx: number): void {
 	if (!manifest.value || !videoElem.value) {
 		return;
 	}
+	if (idx === -1) {
+		saveQualityChoice(null);
+		switchToSource(autoSource());
+		return;
+	}
 	const source = manifest.value.sources[idx];
 	if (!source) {
 		return;
 	}
-	const currentTime = videoElem.value.currentTime;
-	const wasPlaying = !videoElem.value.paused;
-	videoElem.value.src = source.url;
-	videoElem.value.load();
-	videoElem.value.currentTime = currentTime;
-	if (wasPlaying) {
-		videoElem.value.play().catch(e => {
-			console.error("DirectPlayer: error resuming after quality switch:", e);
-		});
-	}
+	saveQualityChoice(source.quality);
+	switchToSource(idx);
 	qualities.currentVideoTrack.value = idx;
 }
 
+function autoSource(): number {
+	return pickAutoSource(
+		manifest.value?.sources ?? [],
+		measuredSpeed,
+		deviceMaxQuality(currentDeviceInfo()),
+	);
+}
+
+/** Starts a source playing from the file's beginning, for a new video. */
+function startSource(idx: number): void {
+	const source = manifest.value?.sources[idx];
+	if (!source || !videoElem.value) {
+		return;
+	}
+	activeSource = idx;
+	qualities.currentActiveQuality.value = idx;
+	stallWatch.loaded(performance.now());
+	videoElem.value.src = source.url;
+}
+
+/** Moves to another size of the same video, carrying on from the same spot. */
+function switchToSource(idx: number): void {
+	const video = videoElem.value;
+	if (!video || idx === activeSource) {
+		return;
+	}
+	const resumeAt = video.currentTime;
+	const wasPlaying = !video.paused;
+	startSource(idx);
+	video.load();
+	pendingResume?.abort();
+	pendingResume = new AbortController();
+	// Until the new file's metadata is in, a browser may drop a new position. The room's sync then
+	// fine-tunes from here, since time has passed while this file loaded.
+	video.addEventListener(
+		"loadedmetadata",
+		() => {
+			video.currentTime = resumeAt;
+			if (wasPlaying) {
+				video.play().catch(e => {
+					console.error("DirectPlayer: error resuming after quality switch:", e);
+				});
+			}
+		},
+		{ once: true, signal: pendingResume.signal },
+	);
+}
+
+/** Moves to the next size down if this viewer is on Auto and there is one. */
+function stepDownIfOnAuto(): boolean {
+	if (!manifest.value || qualities.currentVideoTrack.value !== -1) {
+		return false;
+	}
+	const lower = nextLowerSource(manifest.value.sources, activeSource);
+	if (lower === null) {
+		return false;
+	}
+	console.log("DirectPlayer: moving down to source", lower);
+	switchToSource(lower);
+	return true;
+}
+
+/** A video that keeps running out of data while playing is too big for this connection. */
+function stepDownIfStruggling(): void {
+	const video = videoElem.value;
+	// A seek waits for data whatever the size, so that wait says nothing about the connection.
+	if (!video || video.paused || video.seeking) {
+		return;
+	}
+	if (stallWatch.stalled(performance.now())) {
+		stepDownIfOnAuto();
+	}
+}
+
+/** The speed to judge Auto by: a recent reading if this device has one, otherwise a new one. */
+async function findSpeed(url: string): Promise<number | null> {
+	const recent = loadRecentSpeed(Date.now());
+	if (recent !== null) {
+		return recent;
+	}
+	const speed = await measureSpeed(url);
+	if (speed !== null) {
+		saveRecentSpeed(speed, Date.now());
+	}
+	return speed;
+}
+
 function isAutoQualitySupported(): boolean {
-	return false;
+	return isQualitySupported();
 }
 
 function getCurrentActiveQuality(): number | null {
@@ -399,6 +504,10 @@ function canAdjustRate(): boolean {
 	return !!video && !video.paused && !video.ended && isSettled();
 }
 
+function noteSyncTrouble(): void {
+	stepDownIfOnAuto();
+}
+
 function setAudioBoost(boost: number): void {
 	audioBoost.setBoost(boost);
 }
@@ -415,6 +524,10 @@ async function loadVideoSource() {
 	await applyActiveTrack(-1, false);
 	audioBoost.resetFailedSetup();
 	manifest.value = null;
+	activeSource = -1;
+	pendingResume?.abort();
+	loadGeneration += 1;
+	const generation = loadGeneration;
 
 	if (videoMime.value === "application/json") {
 		try {
@@ -430,21 +543,31 @@ async function loadVideoSource() {
 			emit("error");
 			return;
 		}
-		const firstSource = manifest.value.sources[0];
-		if (!firstSource) {
+		const sources = manifest.value.sources;
+		if (!sources[0]) {
 			console.error("DirectPlayer: manifest has no sources");
 			emit("error");
 			return;
 		}
-		videoElem.value.src = firstSource.url;
+		const chosenHeight = sources.length > 1 ? loadQualityChoice() : null;
+		const onAuto = chosenHeight === null;
+		if (onAuto && sources.length > 1) {
+			measuredSpeed = await findSpeed(sources[0].url);
+		}
+		if (generation !== loadGeneration || !videoElem.value) {
+			return;
+		}
+		const start = onAuto ? autoSource() : sourceForHeight(sources, chosenHeight);
+		startSource(start);
 
 		qualities.videoTracks.value = getVideoTracks();
-		qualities.currentVideoTrack.value = 0;
+		qualities.currentVideoTrack.value = onAuto ? -1 : start;
 	} else {
 		videoElem.value.src = videoUrl.value;
 
 		qualities.videoTracks.value = [];
 		qualities.currentVideoTrack.value = -1;
+		qualities.currentActiveQuality.value = null;
 	}
 
 	if (subtitleSources.value.length > 0) {
@@ -471,6 +594,10 @@ async function loadVideoSource() {
 }
 
 function onCanPlay() {
+	if (videoElem.value?.videoWidth === 0) {
+		// A browser that can't decode a file's picture may still play its sound, with no error.
+		stepDownIfOnAuto();
+	}
 	emit("ready");
 }
 
@@ -484,6 +611,11 @@ function onPaused() {
 
 function onWaiting() {
 	emit("waiting");
+}
+
+function onVideoWaiting() {
+	onWaiting();
+	stepDownIfStruggling();
 }
 
 function onBuffering() {
@@ -509,8 +641,10 @@ function onEnd() {
 }
 
 function onError(err: Event) {
-	emit("error");
 	console.error("DirectPlayer: error:", err);
+	if (!stepDownIfOnAuto()) {
+		emit("error");
+	}
 }
 
 onMounted(() => {
@@ -519,6 +653,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 	destroyJassub();
+	loadGeneration += 1;
+	pendingResume?.abort();
 });
 
 watch([videoUrl, subtitleUrl], () => {
@@ -548,6 +684,7 @@ defineExpose({
 	setSyncRate,
 	isSettled,
 	canAdjustRate,
+	noteSyncTrouble,
 	setAudioBoost,
 } satisfies MediaPlayerWithCaptions & MediaPlayerWithPlaybackRate & MediaPlayerWithAudioBoost & MediaPlayerWithQuality & MediaPlayerWithSyncRate);
 </script>
