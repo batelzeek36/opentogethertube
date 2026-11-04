@@ -6,6 +6,7 @@
 				'in-video': mode === 'in-video',
 				'outside-video relative rounded-b-md': mode === 'outside-video',
 				'hide': !controlsVisible,
+				'hidden-taps-reveal': hiddenTapsReveal,
 			}"
 		>
 			<VideoProgressSlider :current-position="sliderPosition" />
@@ -35,6 +36,7 @@ import PlaybackRateSwitcher from "./PlaybackRateSwitcher.vue";
 import VideoSettings from "./VideoSettings.vue";
 import PictureInPictureButton from "./PictureInPictureButton.vue";
 import { elementFullscreenAvailable } from "@/components/composables/fullscreen";
+import { isIos } from "@/util/device-type";
 
 withDefaults(
 	defineProps<{
@@ -51,6 +53,8 @@ withDefaults(
 
 /** Without a browser fullscreen this row's button is the only way in, so it has to stay on screen. */
 const pinFullscreen = !elementFullscreenAvailable();
+/** See ios-taps: a tap meant to bring the controls back never presses the unseen one under it. */
+const hiddenTapsReveal = isIos();
 </script>
 
 <!-- biome-ignore lint/nursery/useScopedStyles: biome migration -->
@@ -83,6 +87,10 @@ const pinFullscreen = !elementFullscreenAvailable();
 			opacity: 0;
 			transition: all 0.5s;
 			bottom: 0;
+
+			&.hidden-taps-reveal {
+				pointer-events: none;
+			}
 		}
 	}
 

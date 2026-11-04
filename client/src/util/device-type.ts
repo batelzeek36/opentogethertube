@@ -18,6 +18,7 @@ const COMPUTER = /\b(Windows NT|Macintosh|CrOS|X11|Linux)\b/i;
 const ANDROID = /\bAndroid\b/;
 const ANDROID_PHONE = /\bMobile\b/;
 const MAC_PLATFORM = /Mac/;
+const IOS = /\b(iPhone|iPad|iPod)\b/;
 
 /** The coarse type of a device, or undefined when it can't be told. Unknown shows no icon. */
 export function deviceTypeFrom(clues: DeviceClues): DeviceType | undefined {
@@ -43,6 +44,15 @@ export function deviceTypeFrom(clues: DeviceClues): DeviceType | undefined {
 		return "computer";
 	}
 	return undefined;
+}
+
+/** An iPhone, iPad or iPod, in any browser: they all run on Apple's WebKit there. */
+export function iosFrom({ userAgent, platform, maxTouchPoints }: DeviceClues): boolean {
+	return IOS.test(userAgent) || (MAC_PLATFORM.test(platform) && maxTouchPoints > 1);
+}
+
+export function isIos(): boolean {
+	return iosFrom(navigator);
 }
 
 export function detectDeviceType(): DeviceType | undefined {

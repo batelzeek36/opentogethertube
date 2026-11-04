@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type DeviceClues, deviceTypeFrom } from "@/util/device-type";
+import { type DeviceClues, deviceTypeFrom, iosFrom } from "@/util/device-type";
 
 const clues = (over: Partial<DeviceClues>): DeviceClues => ({
 	userAgent: "",
@@ -119,5 +119,57 @@ describe("deviceTypeFrom", () => {
 		["nothing to go on", ""],
 	])("%s is unknown", (_name, userAgent) => {
 		expect(deviceTypeFrom(clues({ userAgent }))).toBeUndefined();
+	});
+});
+
+describe("iosFrom", () => {
+	it.each<[string, Partial<DeviceClues>]>([
+		[
+			"iPhone Safari",
+			{
+				userAgent:
+					"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+			},
+		],
+		[
+			"Chrome on an iPhone",
+			{
+				userAgent:
+					"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0 Mobile/15E148 Safari/604.1",
+			},
+		],
+		["an iPad calling itself a Mac", { platform: "MacIntel", maxTouchPoints: 5 }],
+	])("is true for %s", (_name, over) => {
+		expect(iosFrom(clues(over))).toBe(true);
+	});
+
+	it.each<[string, Partial<DeviceClues>]>([
+		[
+			"Chrome on Android",
+			{
+				userAgent:
+					"Mozilla/5.0 (Linux; Android 14; SM-S938U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36",
+				platform: "Linux armv81",
+				maxTouchPoints: 5,
+			},
+		],
+		[
+			"Safari on a Mac",
+			{
+				userAgent:
+					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+				platform: "MacIntel",
+			},
+		],
+		[
+			"Chrome on Windows",
+			{
+				userAgent:
+					"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+				platform: "Win32",
+			},
+		],
+	])("is false for %s", (_name, over) => {
+		expect(iosFrom(clues(over))).toBe(false);
 	});
 });
