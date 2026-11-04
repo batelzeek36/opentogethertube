@@ -412,20 +412,29 @@ function switchToSource(idx: number): void {
 	);
 }
 
-/** On Auto, a video that keeps running out of data while playing moves down a size. */
-function stepDownIfStruggling(): void {
-	const video = videoElem.value;
-	if (!video || !manifest.value || qualities.currentVideoTrack.value !== -1) {
-		return;
-	}
-	// A seek waits for data whatever the size, so that wait says nothing about the connection.
-	if (video.paused || video.seeking || !stallWatch.stalled(performance.now())) {
-		return;
+/** Moves to the next size down if this viewer is on Auto and there is one. */
+function stepDownIfOnAuto(): boolean {
+	if (!manifest.value || qualities.currentVideoTrack.value !== -1) {
+		return false;
 	}
 	const lower = nextLowerSource(manifest.value.sources, activeSource);
-	if (lower !== null) {
-		console.log("DirectPlayer: stalling, moving down to source", lower);
-		switchToSource(lower);
+	if (lower === null) {
+		return false;
+	}
+	console.log("DirectPlayer: moving down to source", lower);
+	switchToSource(lower);
+	return true;
+}
+
+/** A video that keeps running out of data while playing is too big for this connection. */
+function stepDownIfStruggling(): void {
+	const video = videoElem.value;
+	// A seek waits for data whatever the size, so that wait says nothing about the connection.
+	if (!video || video.paused || video.seeking) {
+		return;
+	}
+	if (stallWatch.stalled(performance.now())) {
+		stepDownIfOnAuto();
 	}
 }
 
@@ -581,6 +590,10 @@ async function loadVideoSource() {
 }
 
 function onCanPlay() {
+	if (videoElem.value?.videoWidth === 0) {
+		// A browser that can't decode a file's picture may still play its sound, with no error.
+		stepDownIfOnAuto();
+	}
 	emit("ready");
 }
 
@@ -624,8 +637,10 @@ function onEnd() {
 }
 
 function onError(err: Event) {
-	emit("error");
 	console.error("DirectPlayer: error:", err);
+	if (!stepDownIfOnAuto()) {
+		emit("error");
+	}
 }
 
 onMounted(() => {
