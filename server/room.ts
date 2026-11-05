@@ -1645,7 +1645,10 @@ export class Room implements RoomState {
 	/** A guest's role follows their browser, so every tab they have open has to hear about it. */
 	private async setGuestRole(target: RoomUser, role: Role): Promise<void> {
 		this.guestRoles.assign(target.token, role);
+		// Saved now, not when the debounce gets to it: a crash in between would give a moderator
+		// the owner just removed their role back.
 		void this.saveStateToRedisDebounced();
+		await this.saveStateToRedisDebounced.flush();
 		for (const tab of this.realusers.filter(user => user.token === target.token)) {
 			await this.syncUser(this.getUserInfo(tab.id));
 		}

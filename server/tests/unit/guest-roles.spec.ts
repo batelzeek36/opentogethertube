@@ -10,7 +10,7 @@ import roommanager, { redisStateToState } from "../../roommanager.js";
 import usermanager from "../../usermanager.js";
 import storage from "../../storage.js";
 import tokens, { type SessionInfo } from "../../auth/tokens.js";
-import { buildClients } from "../../redisclient.js";
+import { buildClients, redisClient } from "../../redisclient.js";
 import { loadModels } from "../../models/index.js";
 import { loadConfigFile } from "../../ott-config.js";
 import { UnloadReason } from "../../generated.js";
@@ -519,6 +519,23 @@ describe("guest moderators", () => {
 			delete old.guestRoles;
 			const loaded = fromRedis(JSON.stringify(old));
 			expect(loaded.guestRoles.roleOf(GUEST_TOKEN)).toEqual(Role.UnregisteredUser);
+		});
+
+		it("is saved before the room hears about it, so a crash can't undo it", async () => {
+			const savedRole = async () => {
+				const saved = await redisClient.get("room:foo");
+				return saved ? fromRedis(saved).guestRoles.roleOf(GUEST_TOKEN) : undefined;
+			};
+			const heard = (role: Role) =>
+				vi.waitFor(() => expect(rolesHeard(owner, guest).at(-1)).toEqual(role));
+
+			promote(owner, guest, Role.Moderator);
+			await heard(Role.Moderator);
+			expect(await savedRole()).toEqual(Role.Moderator);
+
+			promote(owner, guest, Role.UnregisteredUser);
+			await heard(Role.UnregisteredUser);
+			expect(await savedRole()).toEqual(Role.UnregisteredUser);
 		});
 
 		it("survives a server restart, where the room's Redis state is kept", async () => {
