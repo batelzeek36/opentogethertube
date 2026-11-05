@@ -186,6 +186,8 @@ const showEditName = ref(false);
 const setUsernameLoading = ref(false);
 const setUsernameFailureText = ref("");
 const roleActions = [Role.Administrator, Role.Moderator, Role.TrustedUser, Role.RegisteredUser];
+/** A guest has no account to hold anything else, so the server takes only these two for them. */
+const guestRoleActions = [Role.Moderator, Role.UnregisteredUser];
 
 function openEditName() {
 	if (!inputUsername.value) {
@@ -223,9 +225,6 @@ function canUserBePromotedTo(user: RoomUserInfo, role: Role): boolean {
 	if (user.role === role) {
 		return false;
 	}
-	if (user.role === Role.UnregisteredUser || role === Role.UnregisteredUser) {
-		return false;
-	}
 	if (role > Role.RegisteredUser) {
 		// check for promote
 		return granted(roleToPermission(role));
@@ -239,7 +238,8 @@ function canUserBePromotedTo(user: RoomUserInfo, role: Role): boolean {
 }
 
 function getRoleActions(user: RoomUserInfo): Role[] {
-	return roleActions.filter(role => canUserBePromotedTo(user, role));
+	const actions = user.isLoggedIn ? roleActions : guestRoleActions;
+	return actions.filter(role => canUserBePromotedTo(user, role));
 }
 
 function canSelfKickUser(user: RoomUserInfo): boolean {

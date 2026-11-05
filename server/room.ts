@@ -6,6 +6,7 @@ import { VoiceRulesSchema } from "ott-common/models/zod-schemas.js";
 import { VoiceChannels } from "./voice.js";
 import { ChatReactions } from "./chat-reactions.js";
 import { UndoableEvents } from "./room-undo.js";
+import { GuestRoles } from "./guest-roles.js";
 import { redisClient } from "./redisclient.js";
 import { getLogger } from "./logger.js";
 import type winston from "winston";
@@ -94,6 +95,23 @@ import { canKickUser } from "ott-common/userutils.js";
 import { getSubtitleFormatFromUrl } from "ott-common/subtitles.js";
 import { conf } from "./ott-config.js";
 import { ALL_SKIP_CATEGORIES } from "ott-common/constants.js";
+import {
+	storableProps,
+	syncableProps,
+	type RoomState,
+	type RoomStatePersistable,
+	type RoomStateStorable,
+	type RoomStateSyncable,
+} from "./room-state.js";
+
+export type {
+	RoomState,
+	RoomStateComputed,
+	RoomStateFromRedis,
+	RoomStatePersistable,
+	RoomStateStorable,
+	RoomStateSyncable,
+} from "./room-state.js";
 
 /** Each client can send a reaction at most this often, so held taps cannot flood a room. */
 const REACTION_MIN_INTERVAL_MS = 120;
@@ -146,110 +164,6 @@ export class RoomUser {
 	}
 }
 
-/**
- * Things that Rooms need to remember, but can safely be forgotten when the room is unloaded.
- * This rule does not necessarily apply to inherited fields.
- */
-export interface RoomState extends RoomOptions, RoomStateComputed {
-	currentSource: QueueItem | null;
-	queue: VideoQueue;
-	isPlaying: boolean;
-	playbackPosition: number;
-	playbackSpeed: number;
-	users: RoomUserInfo[];
-	votes: Map<string, Set<ClientId>>;
-	votesToSkip: Set<ClientId>;
-	videoSegments: Segment[];
-}
-
-export type RoomStateFromRedis = Omit<RoomState, "userRoles" | "grants"> & {
-	grants: [Role, GrantMask][];
-	userRoles: [Role, number[]][];
-};
-
-export interface RoomStateComputed {
-	hasOwner: boolean;
-	voteCounts: Map<string, number>;
-}
-
-// Only these should be sent to clients, all others should be considered unsafe
-export type RoomStateSyncable = Omit<RoomState, "owner" | "votes" | "userRoles" | "users">;
-
-// Only these should be stored in redis
-export type RoomStateStorable = Omit<
-	RoomState,
-	"hasOwner" | "votes" | "voteCounts" | "users" | "votesToSkip"
-> & { _playbackStart: Dayjs | null };
-
-const syncableProps: (keyof RoomStateSyncable)[] = [
-	"name",
-	"title",
-	"description",
-	"isTemporary",
-	"visibility",
-	"queueMode",
-	"currentSource",
-	"queue",
-	"isPlaying",
-	"playbackPosition",
-	"playbackSpeed",
-	"grants",
-	"hasOwner",
-	"voteCounts",
-	"videoSegments",
-	"autoSkipSegmentCategories",
-	"prevQueue",
-	"restoreQueueBehavior",
-	"enableVoteSkip",
-	"voiceEnabled",
-	"voiceMaxTalkSeconds",
-	"voiceSlowModeSeconds",
-	"votesToSkip",
-];
-
-const storableProps: (keyof RoomStateStorable)[] = [
-	"name",
-	"title",
-	"description",
-	"isTemporary",
-	"visibility",
-	"queueMode",
-	"currentSource",
-	"queue",
-	"isPlaying",
-	"playbackPosition",
-	"playbackSpeed",
-	"grants",
-	"userRoles",
-	"owner",
-	"_playbackStart",
-	"videoSegments",
-	"autoSkipSegmentCategories",
-	"prevQueue",
-	"restoreQueueBehavior",
-	"enableVoteSkip",
-	"voiceEnabled",
-	"voiceMaxTalkSeconds",
-	"voiceSlowModeSeconds",
-];
-
-/** Only these should be stored in persistent storage */
-export type RoomStatePersistable = Omit<
-	RoomState,
-	| "isTemporary"
-	| "currentSource"
-	| "queue"
-	| "isPlaying"
-	| "playbackPosition"
-	| "playbackSpeed"
-	| "users"
-	| "votes"
-	| "videoSegments"
-	| "hasOwner"
-	| "voteCounts"
-	| "votesToSkip"
->;
-
 export class Room implements RoomState {
 	_name = "";
 	_title = "";
@@ -261,6 +175,7 @@ export class Room implements RoomState {
 	grants: Grants = new Grants();
 	private lastReactionAt = new Map<ClientId, number>();
 	userRoles: Map<Role, Set<number>>;
+	guestRoles = new GuestRoles();
 	_autoSkipSegmentCategories = Array.from(ALL_SKIP_CATEGORIES);
 	restoreQueueBehavior: BehaviorOption = BehaviorOption.Prompt;
 	_enableVoteSkip: boolean = false;
@@ -345,6 +260,7 @@ export class Room implements RoomState {
 				"restoreQueueBehavior",
 				"enableVoteSkip",
 				"votesToSkip",
+				"guestRoles",
 				"voiceEnabled",
 				"voiceMaxTalkSeconds",
 				"voiceSlowModeSeconds",
@@ -713,16 +629,16 @@ export class Room implements RoomState {
 		if (user.isLoggedIn) {
 			return Role.RegisteredUser;
 		} else {
-			return Role.UnregisteredUser;
+			return this.guestRoles.roleOf(user.token);
 		}
 	}
 
 	async getRoleFromToken(token: AuthToken): Promise<Role> {
 		const session = await tokens.getSessionInfo(token);
-		return this.getRoleFromSession(session);
+		return this.getRoleFromSession(session, token);
 	}
 
-	getRoleFromSession(session: SessionInfo): Role {
+	getRoleFromSession(session: SessionInfo, token: AuthToken): Role {
 		if (session && "user_id" in session) {
 			if (this.owner && this.owner.id === session.user_id) {
 				return Role.Owner;
@@ -734,7 +650,7 @@ export class Room implements RoomState {
 			}
 			return Role.RegisteredUser;
 		} else {
-			return Role.UnregisteredUser;
+			return this.guestRoles.roleOf(token);
 		}
 	}
 
@@ -1142,7 +1058,7 @@ export class Room implements RoomState {
 
 		return {
 			username,
-			role: this.getRoleFromSession(session),
+			role: this.getRoleFromSession(session, authorization.token),
 			clientId: authorization.clientId,
 			auth: authorization,
 		};
@@ -1693,22 +1609,21 @@ export class Room implements RoomState {
 			this.grants.check(context.role, demotePerm);
 		}
 
-		if (targetCurrentRole === Role.UnregisteredUser) {
-			throw new ImpossiblePromotionException();
+		if (targetUser.user_id === undefined) {
+			await this.setGuestRole(targetUser, request.role);
+			return;
 		}
-		if (targetUser.user_id !== undefined) {
-			for (let i = Role.Administrator; i >= Role.TrustedUser; i--) {
-				const set = this.userRoles.get(i);
-				if (set) {
-					if (set.has(targetUser.user_id)) {
-						set.delete(targetUser.user_id);
-					}
-					this.userRoles[i] = Array.from(set);
+		for (let i = Role.Administrator; i >= Role.TrustedUser; i--) {
+			const set = this.userRoles.get(i);
+			if (set) {
+				if (set.has(targetUser.user_id)) {
+					set.delete(targetUser.user_id);
 				}
+				this.userRoles[i] = Array.from(set);
 			}
-			if (request.role >= Role.TrustedUser) {
-				this.userRoles.get(request.role)?.add(targetUser.user_id);
-			}
+		}
+		if (request.role >= Role.TrustedUser) {
+			this.userRoles.get(request.role)?.add(targetUser.user_id);
 		}
 		await this.syncUser(this.getUserInfo(targetUser.id));
 		if (!this.isTemporary) {
@@ -1724,6 +1639,18 @@ export class Room implements RoomState {
 					);
 				}
 			}
+		}
+	}
+
+	/** A guest's role follows their browser, so every tab they have open has to hear about it. */
+	private async setGuestRole(target: RoomUser, role: Role): Promise<void> {
+		this.guestRoles.assign(target.token, role);
+		// Saved now, not when the debounce gets to it: a crash in between would give a moderator
+		// the owner just removed their role back.
+		void this.saveStateToRedisDebounced();
+		await this.saveStateToRedisDebounced.flush();
+		for (const tab of this.realusers.filter(user => user.token === target.token)) {
+			await this.syncUser(this.getUserInfo(tab.id));
 		}
 	}
 

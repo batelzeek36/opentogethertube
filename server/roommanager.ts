@@ -1,4 +1,5 @@
 import { Room, type RoomState, type RoomStateFromRedis } from "./room.js";
+import { GuestRoles } from "./guest-roles.js";
 import type { Role, RoomOptions, Visibility } from "ott-common/models/types.js";
 import _ from "lodash";
 import { getLogger } from "./logger.js";
@@ -72,6 +73,7 @@ export function redisStateToState(state: RoomStateFromRedis): RoomState {
 		...state,
 		grants,
 		userRoles,
+		guestRoles: new GuestRoles(state.guestRoles),
 	};
 }
 

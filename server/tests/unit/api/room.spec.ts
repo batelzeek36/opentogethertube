@@ -27,7 +27,7 @@ import type { User } from "../../../models/user.js";
 import { UnloadReason } from "../../../generated.js";
 import clientmanager from "../../../clientmanager.js";
 import { Client } from "../../../client.js";
-import type { Room } from "../../../room.js";
+import { type Room, RoomUser } from "../../../room.js";
 
 const JSON_CONTENT_TYPE_REGEX = /json/;
 
@@ -161,6 +161,23 @@ describe("Room API", () => {
 				});
 			},
 		);
+
+		it("shows a guest's role without showing how the room knows them", async () => {
+			await roommanager.createRoom({ name: "test1", isTemporary: true });
+			const room = (await roommanager.getRoom("test1")).unwrap();
+			room.realusers.push(new RoomUser("guest", "guest-token"));
+			room.guestRoles.assign("guest-token", Role.Moderator);
+
+			const resp = await request(app)
+				.get("/api/room/test1")
+				.auth(token, { type: "bearer" })
+				.expect(200);
+
+			expect(resp.body.users).toMatchObject([{ id: "guest", role: Role.Moderator }]);
+			expect(resp.body).not.toHaveProperty("guestRoles");
+			expect(resp.text).not.toContain("guest-token");
+			expect(resp.text).not.toContain(room.guestRoles.toJSON()[0]);
+		});
 
 		it("should fail if the room does not exist", async () => {
 			const resp = await request(app)
