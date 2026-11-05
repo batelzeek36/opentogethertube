@@ -4,6 +4,7 @@ import type { QueueItem } from "ott-common/models/video.js";
 import type { Dayjs } from "dayjs";
 import type { Segment } from "sponsorblock-api";
 import type { VideoQueue } from "./videoqueue.js";
+import type { GuestRoles } from "./guest-roles.js";
 
 /**
  * Things that Rooms need to remember, but can safely be forgotten when the room is unloaded.
@@ -19,11 +20,14 @@ export interface RoomState extends RoomOptions, RoomStateComputed {
 	votes: Map<string, Set<ClientId>>;
 	votesToSkip: Set<ClientId>;
 	videoSegments: Segment[];
+	guestRoles: GuestRoles;
 }
 
-export type RoomStateFromRedis = Omit<RoomState, "userRoles" | "grants"> & {
+export type RoomStateFromRedis = Omit<RoomState, "userRoles" | "grants" | "guestRoles"> & {
 	grants: [Role, GrantMask][];
 	userRoles: [Role, number[]][];
+	/** Absent from anything saved before guests could hold a role. */
+	guestRoles?: string[];
 };
 
 export interface RoomStateComputed {
@@ -32,7 +36,10 @@ export interface RoomStateComputed {
 }
 
 // Only these should be sent to clients, all others should be considered unsafe
-export type RoomStateSyncable = Omit<RoomState, "owner" | "votes" | "userRoles" | "users">;
+export type RoomStateSyncable = Omit<
+	RoomState,
+	"owner" | "votes" | "userRoles" | "guestRoles" | "users"
+>;
 
 // Only these should be stored in redis
 export type RoomStateStorable = Omit<
@@ -80,6 +87,7 @@ export const storableProps: (keyof RoomStateStorable)[] = [
 	"playbackSpeed",
 	"grants",
 	"userRoles",
+	"guestRoles",
 	"owner",
 	"_playbackStart",
 	"videoSegments",
@@ -107,4 +115,5 @@ export type RoomStatePersistable = Omit<
 	| "hasOwner"
 	| "voteCounts"
 	| "votesToSkip"
+	| "guestRoles"
 >;
