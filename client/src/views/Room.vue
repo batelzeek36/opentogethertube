@@ -351,6 +351,7 @@ import { useCaptions, useMediaPlayer, useVolume } from "@/components/composables
 import { useGrants } from "@/components/composables/grants";
 import { isOfficialSite } from "@/util/misc";
 import { DriftCorrector } from "@/util/drift-correction";
+import { playbackToggleGate, releaseFocusedButton } from "@/util/playback-toggle";
 import { Visibility } from "ott-common/models/types";
 
 const VIDEO_CONTROLS_HIDE_TIMEOUT = 3000;
@@ -659,6 +660,9 @@ export default defineComponent({
 		const volume = useVolume();
 
 		function togglePlayback() {
+			if (!playbackToggleGate.admit()) {
+				return;
+			}
 			if (store.state.room.isPlaying) {
 				roomapi.pause();
 			} else {
@@ -846,6 +850,7 @@ export default defineComponent({
 		const shortcuts = new KeyboardShortcuts();
 		shortcuts.bind([{ code: "Space" }, { code: "KeyK" }], () => {
 			if (granted("playback.play-pause")) {
+				releaseFocusedButton();
 				togglePlayback();
 			}
 		});

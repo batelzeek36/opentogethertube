@@ -83,6 +83,7 @@ import { onMounted, onUnmounted } from "vue";
 import { useStore } from "@/store";
 import { useConnection } from "@/plugins/connection";
 import { useRoomApi } from "@/util/roomapi";
+import { mediaSessionAction, playbackToggleGate } from "@/util/playback-toggle";
 import { useGrants } from "../composables/grants";
 
 const props = withDefaults(
@@ -105,13 +106,13 @@ onMounted(() => {
 	if ("mediaSession" in navigator) {
 		navigator.mediaSession.setActionHandler("play", () => {
 			if (granted("playback.play-pause")) {
-				togglePlayback();
+				applyMediaKey("play");
 			}
 		});
 
 		navigator.mediaSession.setActionHandler("pause", () => {
 			if (granted("playback.play-pause")) {
-				togglePlayback();
+				applyMediaKey("pause");
 			}
 		});
 
@@ -133,7 +134,25 @@ onUnmounted(() => {
 
 /** Send a message to play or pause the video, depending on the current state. */
 function togglePlayback() {
+	if (!playbackToggleGate.admit()) {
+		return;
+	}
 	if (store.state.room.isPlaying) {
+		roomapi.pause();
+		emit("pause");
+	} else {
+		roomapi.play();
+		emit("play");
+	}
+}
+
+/** A system media key (or a TV remote over AirPlay) asked for play or pause specifically. */
+function applyMediaKey(key: "play" | "pause") {
+	const action = mediaSessionAction(key, store.state.room.isPlaying);
+	if (!action || !playbackToggleGate.admit()) {
+		return;
+	}
+	if (action === "pause") {
 		roomapi.pause();
 		emit("pause");
 	} else {
